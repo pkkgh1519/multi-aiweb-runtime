@@ -87,8 +87,9 @@ class PromptOnlyOracleTests(unittest.TestCase):
             self.assertEqual(result.scope.blocked_files, [])
             self.assertEqual(result.scope.allowed_files, [])
             self.assertEqual(len(client.calls), 1)
-            self.assertEqual(client.calls[0]["cwd"], state_root / "prompt-only-repo")
-            self.assertTrue((state_root / "prompt-only-repo" / ".git").is_dir())
+            prompt_only_repo = (state_root / "prompt-only-repo").resolve()
+            self.assertEqual(client.calls[0]["cwd"].resolve(), prompt_only_repo)
+            self.assertTrue((prompt_only_repo / ".git").is_dir())
 
     def test_oracle_timeout_writes_redacted_stdout_and_stderr_logs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
