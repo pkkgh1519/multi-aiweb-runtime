@@ -67,7 +67,7 @@ The installer generates machine-local files such as `.mcp.json` and `install-man
 pnpm install --prod --frozen-lockfile --ignore-scripts
 ```
 
-`--ignore-scripts` is required because Oracle's package `prepare` lifecycle runs a TypeScript build that depends on devDependencies. The release already includes the built `dist` files, so installation only needs production dependencies from the lockfile.
+`--ignore-scripts` is required because Oracle's package `prepare` lifecycle runs a TypeScript build that depends on devDependencies. The release includes the built `engines/oracle/dist` files, so installation only needs production dependencies from the lockfile.
 
 ## Troubleshooting
 

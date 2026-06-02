@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3 - Bundled Oracle dist release fix
+
+- Included the built `engines/oracle/dist` runtime files in Git releases.
+- Added plugin validation checks that fail when bundled Oracle CLI/MCP dist files are missing.
+
 ## 0.5.2 - Oracle dependency install fix
 
 - Fixed Windows installer Oracle dependency restore by adding `--ignore-scripts` to `pnpm install --prod --frozen-lockfile`.

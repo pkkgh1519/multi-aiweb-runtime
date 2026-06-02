@@ -110,6 +110,16 @@ def main() -> int:
     if not isinstance(servers, dict) or "multi_aiweb_runtime" not in servers:
         errors.append(".mcp.json must define mcpServers.multi_aiweb_runtime")
 
+    oracle_package = root / "engines" / "oracle" / "package.json"
+    if oracle_package.is_file():
+        for required in (
+            root / "engines" / "oracle" / "pnpm-lock.yaml",
+            root / "engines" / "oracle" / "dist" / "bin" / "oracle-cli.js",
+            root / "engines" / "oracle" / "dist" / "bin" / "oracle-mcp.js",
+        ):
+            if not required.is_file():
+                errors.append(f"missing bundled Oracle runtime file: {required.relative_to(root).as_posix()}")
+
     skill = root / "skills" / "multi-aiweb-runtime" / "SKILL.md"
     if not skill.is_file():
         errors.append("missing skills/multi-aiweb-runtime/SKILL.md")

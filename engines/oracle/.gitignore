@@ -5,6 +5,8 @@ coverage
 npm-debug.log*
 .bun-check/
 dist/
+!dist/
+!dist/**
 build/
 *.tsbuildinfo
 tsconfig.tsbuildinfo
