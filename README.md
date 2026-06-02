@@ -61,10 +61,31 @@ The installer generates machine-local files such as `.mcp.json` and `install-man
 .\install.ps1 -NoCachebuster
 ```
 
-`node_modules` is intentionally not committed. When `-SkipOracleDeps` is not used, the installer runs this in the installed Oracle engine directory:
+`node_modules` is intentionally not committed. When `-SkipOracleDeps` is not used, the installer checks for Node 24 or newer, then runs this in the installed Oracle engine directory:
 
 ```powershell
-pnpm install --prod --frozen-lockfile
+pnpm install --prod --frozen-lockfile --ignore-scripts
+```
+
+`--ignore-scripts` is required because Oracle's package `prepare` lifecycle runs a TypeScript build that depends on devDependencies. The release already includes the built `dist` files, so installation only needs production dependencies from the lockfile.
+
+## Troubleshooting
+
+### Oracle dependency install fails
+
+If the installer reports `Unsupported engine: wanted: {"node": ">=24"}`, install Node 24 or newer and rerun the installer.
+
+If `pnpm install --prod` tries to run `pnpm run build` and fails with `tsgo` missing, update to `v0.5.2` or newer and rerun the installer. The installer must use `--ignore-scripts` for production dependency restore.
+
+```powershell
+git pull
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+To install the plugin without Oracle dependencies, use:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -SkipOracleDeps
 ```
 
 ## Verify the install

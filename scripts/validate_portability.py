@@ -68,6 +68,12 @@ def main() -> int:
         if "C:/" in mcp_text or "C:\\" in mcp_text:
             errors.append("source .mcp.json must not contain an absolute Windows path")
 
+    installer = root / "install.ps1"
+    if installer.exists():
+        installer_text = installer.read_text(encoding="utf-8")
+        if "pnpm" in installer_text and "--prod" in installer_text and "--ignore-scripts" not in installer_text:
+            errors.append("install.ps1 must use --ignore-scripts for Oracle production dependency restore")
+
     if errors:
         print("Portability validation failed:")
         for error in errors:

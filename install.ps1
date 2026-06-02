@@ -55,6 +55,20 @@ function Invoke-CheckedCommand([string]$CommandName, [string[]]$CommandArgs, [st
     }
 }
 
+function Assert-NodeMajorVersion([int]$MinimumMajor) {
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        throw "Oracle backend dependency install requires Node $MinimumMajor or newer. Install Node $MinimumMajor+ or rerun with -SkipOracleDeps."
+    }
+    $rawVersion = (& node --version).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not ($rawVersion -match '^v?(\d+)\.')) {
+        throw "Could not determine Node version for Oracle dependency install. Install Node $MinimumMajor+ or rerun with -SkipOracleDeps."
+    }
+    $major = [int]$Matches[1]
+    if ($major -lt $MinimumMajor) {
+        throw "Oracle backend requires Node $MinimumMajor or newer. Current Node is $rawVersion. Upgrade Node or rerun with -SkipOracleDeps to install the plugin without Oracle dependencies."
+    }
+}
+
 function Copy-PluginSource {
     Write-Info "Copy plugin files to $PluginRoot"
     if ($DryRun) { return }
@@ -154,7 +168,8 @@ function Install-OracleDependencies {
         Write-Info "Oracle package.json not found; skip dependency install"
         return
     }
-    Invoke-CheckedCommand -CommandName "pnpm" -CommandArgs @("install", "--prod", "--frozen-lockfile") -WorkingDirectory $engineRoot
+    Assert-NodeMajorVersion -MinimumMajor 24
+    Invoke-CheckedCommand -CommandName "pnpm" -CommandArgs @("install", "--prod", "--frozen-lockfile", "--ignore-scripts") -WorkingDirectory $engineRoot
 }
 
 function Write-InstallManifest([string]$ResolvedMarketplaceName) {

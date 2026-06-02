@@ -1,6 +1,6 @@
 {
   "name": "multi-aiweb-runtime",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Local MCP runtime that lets Codex run ChatGPT/Gemini and future AI web browser sessions through explicit, user-mediated Oracle or Playwright paths with structured artifacts.",
   "author": {
     "name": "Multi-AI Web Runtime Contributors",
