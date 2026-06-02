@@ -73,6 +73,10 @@ def main() -> int:
         installer_text = installer.read_text(encoding="utf-8")
         if "pnpm" in installer_text and "--prod" in installer_text and "--ignore-scripts" not in installer_text:
             errors.append("install.ps1 must use --ignore-scripts for Oracle production dependency restore")
+        if "Write-Utf8NoBom" not in installer_text:
+            errors.append("install.ps1 must write generated JSON as UTF-8 without BOM")
+        if "Set-Content -LiteralPath $MarketplaceConfig -Encoding UTF8" in installer_text:
+            errors.append("install.ps1 must not write marketplace.json with PowerShell UTF8 BOM encoding")
 
     if errors:
         print("Portability validation failed:")

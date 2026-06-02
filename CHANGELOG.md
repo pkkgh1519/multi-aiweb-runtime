@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4 - Marketplace JSON encoding fix
+
+- Fixed Windows PowerShell 5.1 marketplace registration failures by writing generated JSON as UTF-8 without BOM.
+- Added recovery for empty or invalid local marketplace manifests by backing up the invalid file and recreating the manifest.
+- Added portability validation coverage for installer JSON encoding regressions.
+
 ## 0.5.3 - Bundled Oracle dist release fix
 
 - Included the built `engines/oracle/dist` runtime files in Git releases.

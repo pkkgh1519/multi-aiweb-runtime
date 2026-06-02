@@ -71,6 +71,18 @@ pnpm install --prod --frozen-lockfile --ignore-scripts
 
 ## Troubleshooting
 
+### Codex reports `invalid marketplace file`
+
+Older installer versions could write `%USERPROFILE%\.codex\local-marketplaces\.agents\plugins\marketplace.json` with a UTF-8 BOM on Windows PowerShell 5.1. Codex may reject that file at line 1 column 1. Update to `v0.5.4` or newer and rerun the installer:
+
+```powershell
+git pull --tags
+git checkout v0.5.4
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+The installer rewrites generated JSON as UTF-8 without BOM. If the previous marketplace file is empty or invalid JSON, the installer backs it up with an `.invalid.<timestamp>.bak` suffix and recreates the local marketplace manifest.
+
 ### Oracle dependency install fails
 
 If the installer reports `Unsupported engine: wanted: {"node": ">=24"}`, install Node 24 or newer and rerun the installer.
