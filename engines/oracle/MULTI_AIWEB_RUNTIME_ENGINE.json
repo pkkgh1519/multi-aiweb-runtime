@@ -1,0 +1,6 @@
+{
+  "name": "oracle-custom",
+  "version": "0.13.0-multi-aiweb-runtime.1",
+  "upstream_commit": "6019a19",
+  "capabilities_version": "2026-05-31"
+}

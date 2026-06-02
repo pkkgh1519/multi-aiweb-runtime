@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node / Oracle engine dependencies
+node_modules/
+.pnpm-store/
+
+# Codex local install outputs
+install-manifest.json
+mcp-config-snippet.local.toml
+*.local.toml
+
+# Runtime state and browser/auth artifacts
+state/
+artifacts/
+runs/
+profiles/
+*.log
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

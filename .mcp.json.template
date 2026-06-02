@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "multi_aiweb_runtime": {
+      "command": "{{PYTHON_COMMAND}}",
+      "args": ["{{SERVER_SCRIPT_POSIX}}"],
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 7200,
+      "env": {
+        "MULTI_AIWEB_RUNTIME_STATE_DIR": "{{STATE_ROOT_POSIX}}",
+        "MULTI_AIWEB_RUNTIME_PLUGIN_ROOT": "{{PLUGIN_ROOT_POSIX}}",
+        "MULTI_AIWEB_RUNTIME_ORACLE_ENGINE_SOURCE": "bundled"
+      }
+    }
+  }
+}
