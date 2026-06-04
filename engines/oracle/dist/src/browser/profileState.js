@@ -282,7 +282,7 @@ export async function shouldCleanupManualLoginProfileState(userDataDir, logger, 
         logger?.(`DevTools port ${port} still reachable; preserving manual-login profile state`);
         return false;
     }
-    logger?.(`DevTools port ${port} unreachable (${probe.error}); clearing stale profile state`);
+    logger?.(`STALE_DEVTOOLS_PORT: DevTools port ${port} unreachable (${probe.error}); clearing stale profile state`);
     return true;
 }
 export async function cleanupStaleProfileState(userDataDir, logger, options = {}) {
@@ -304,13 +304,13 @@ export async function cleanupStaleProfileState(userDataDir, logger, options = {}
         return;
     }
     if (isProcessAlive(pid)) {
-        logger?.(`Chrome pid ${pid} still alive; skipping profile lock cleanup`);
+        logger?.(`PROFILE_BUSY: Chrome pid ${pid} still alive; skipping profile lock cleanup`);
         return;
     }
     // Extra safety: if Chrome is running with this profile (but with a different PID, e.g. user relaunched
     // without remote debugging), never delete lock files.
     if (await isChromeUsingUserDataDir(userDataDir)) {
-        logger?.("Detected running Chrome using this profile; skipping profile lock cleanup");
+        logger?.("PROFILE_BUSY: Detected running Chrome using this profile; skipping profile lock cleanup");
         return;
     }
     const lockFiles = [

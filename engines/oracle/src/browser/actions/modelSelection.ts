@@ -69,7 +69,7 @@ export async function ensureModelSelection(
     }
     default: {
       await logDomFailure(Runtime, logger, "model-switcher-button");
-      throw new Error("Unable to locate the ChatGPT model selector button.");
+      throw new Error("MODEL_SELECTOR_UNAVAILABLE: Unable to locate the ChatGPT model selector button.");
     }
   }
 }
@@ -147,6 +147,7 @@ function buildModelSelectionExpression(
   return `(() => {
     ${buildClickDispatcher()}
     // Capture the selectors and matcher literals up front so the browser expression stays pure.
+    const MODEL_SELECTOR_UNAVAILABLE_MARKER = 'MODEL_SELECTOR_UNAVAILABLE';
     const BUTTON_SELECTOR = '${MODEL_BUTTON_SELECTOR}';
     const COMPOSER_MODEL_SIGNAL_SELECTOR = ${composerSignalSelectorLiteral};
     const LABEL_TOKENS = ${labelLiteral};
@@ -254,7 +255,7 @@ function buildModelSelectionExpression(
 
     const button = findModelButton();
     if (!button) {
-      return { status: 'button-missing' };
+      return { status: 'button-missing', marker: MODEL_SELECTOR_UNAVAILABLE_MARKER };
     }
 
     const closeMenu = () => {

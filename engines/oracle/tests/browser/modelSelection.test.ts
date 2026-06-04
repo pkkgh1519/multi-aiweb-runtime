@@ -335,6 +335,11 @@ const evaluateComposerPillFallbackExpression = (
 };
 
 describe("browser model selection matchers", () => {
+  it("marks missing ChatGPT model selector as classifiable", () => {
+    const expression = buildModelSelectionExpressionForTest("gpt-5.5-pro");
+    expect(expression).toContain("MODEL_SELECTOR_UNAVAILABLE");
+  });
+
   it("includes pro + 5.5 tokens for gpt-5.5-pro", () => {
     const { labelTokens, testIdTokens } = buildModelMatchersLiteralForTest("gpt-5.5-pro");
     expect(labelTokens).toContain("pro extended");
