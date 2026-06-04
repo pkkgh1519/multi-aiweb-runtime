@@ -143,6 +143,8 @@ Ask Codex to use Multi-AI Web Runtime for a dry-run prompt, or call the MCP flow
 
 Authentication remains user-mediated in visible or dedicated browser profiles. The runtime does not extract browser credentials, copy cookies, move tokens between profiles, or enable provider API keys by default.
 
+ChatGPT/Gemini prompts and final web responses are stored locally as run artifacts under the Codex state directory. Do not send secrets, credentials, cookies, private keys, or browser profile files through AI web runs. Runtime logs and events are redacted, but the browser provider still receives the prompt and any approved files.
+
 For Oracle-backed runs, requested files are validated before launch. Prompt-only Oracle runs use a managed empty runtime directory. File-attached runs reject repo escapes, absolute Windows drive paths, home-directory paths, `.env`-style files, private keys, cookie stores, and browser profile storage.
 
 ## Development checks
