@@ -155,11 +155,27 @@ class OracleAdapter:
                 oracle_engine=command_result.engine_identity,
                 command_result=command_result,
             )
+        timeout_message = _failure_message("Oracle browser run timed out.", command_result)
+        timeout_classified = _classify_chatgpt_pro_failure(timeout_message) if target == DEFAULT_ORACLE_TARGET else None
+        if command_result.timed_out and timeout_classified is not None:
+            status, phase = timeout_classified
+            return OracleRunResult(
+                status=status,
+                phase=phase,
+                message=redact(timeout_message),
+                scope=scope,
+                oracle_target=target,
+                provider=provider,
+                oracle_model=resolved_model,
+                oracle_thinking_time=thinking_time,
+                oracle_engine=command_result.engine_identity,
+                command_result=command_result,
+            )
         if command_result.timed_out:
             return OracleRunResult(
                 status="timeout",
                 phase="TIMEOUT",
-                message=_failure_message("Oracle browser run timed out.", command_result),
+                message=timeout_message,
                 scope=scope,
                 oracle_target=target,
                 provider=provider,
@@ -169,6 +185,21 @@ class OracleAdapter:
                 command_result=command_result,
             )
         message = _failure_message("Oracle browser run failed.", command_result)
+        classified = _classify_chatgpt_pro_failure(message) if target == DEFAULT_ORACLE_TARGET else None
+        if classified is not None:
+            status, phase = classified
+            return OracleRunResult(
+                status=status,
+                phase=phase,
+                message=redact(message),
+                scope=scope,
+                oracle_target=target,
+                provider=provider,
+                oracle_model=resolved_model,
+                oracle_thinking_time=thinking_time,
+                oracle_engine=command_result.engine_identity,
+                command_result=command_result,
+            )
         return OracleRunResult(
             status="failed",
             phase="ORACLE_FAILED",
@@ -235,6 +266,29 @@ def _failure_message(prefix: str, command_result: OracleCommandResult) -> str:
     if not details:
         return prefix
     return redact(prefix + " " + " ".join(details))
+
+
+def _classify_chatgpt_pro_failure(message: str) -> tuple[str, str] | None:
+    lowered = message.lower()
+    if "chatgpt thinking" in lowered or "pro thinking" in lowered:
+        return "running", "LONG_THINKING_IN_PROGRESS"
+    if "model_selector_unavailable" in lowered or "unable to locate the chatgpt model selector button" in lowered:
+        return "user_action_required", "MODEL_SELECTOR_UNAVAILABLE"
+    if "unable to find model option" in lowered and "pro" in lowered:
+        return "user_action_required", "PRO_NOT_AVAILABLE"
+    if "pro_effort_unconfirmed" in lowered or "refusing to submit without confirmed pro extended" in lowered:
+        return "user_action_required", "PRO_EFFORT_UNCONFIRMED"
+    if "assistant response timed out before completion" in lowered or "reattach later" in lowered:
+        return "running", "REATTACH_REQUIRED"
+    if "incomplete-capture" in lowered or "capture incomplete" in lowered:
+        return "running", "CAPTURE_INCOMPLETE"
+    if "prompt did not appear in conversation" in lowered:
+        return "user_action_required", "PROMPT_NOT_SUBMITTED"
+    if "chrome window closed" in lowered or "econnrefused" in lowered:
+        return "user_action_required", "PROFILE_BUSY"
+    if "login" in lowered and "required" in lowered:
+        return "user_action_required", "LOGIN_REQUIRED"
+    return None
 
 
 def _tail(text: str, limit: int = 1200) -> str:

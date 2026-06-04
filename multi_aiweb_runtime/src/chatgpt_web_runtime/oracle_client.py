@@ -215,17 +215,16 @@ class OracleClient:
         if os.name == "nt":
             creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        with stdout_path.open("ab") as stdout_file, stderr_path.open("ab") as stderr_file:
-            process = subprocess.Popen(
-                command,
-                cwd=str(Path(cwd).expanduser().resolve()),
-                env=self._sanitized_env(base_env, oracle_target=target),
-                stdin=subprocess.DEVNULL,
-                stdout=stdout_file,
-                stderr=stderr_file,
-                shell=False,
-                creationflags=creationflags,
-            )
+        process = subprocess.Popen(
+            command,
+            cwd=str(Path(cwd).expanduser().resolve()),
+            env=self._sanitized_env(base_env, oracle_target=target),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            shell=False,
+            creationflags=creationflags,
+        )
         return OracleManualLoginLaunchResult(
             pid=int(process.pid),
             command=command,

@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from .redaction import redact, redact_nested
+
 VALID_STATUSES = {
     "idle",
     "draft",
@@ -71,19 +73,19 @@ class RuntimeEvent:
             "eventId": self.event_id,
             "runId": self.run_id,
             "status": self.status,
-            "url": self.url,
-            "title": self.title,
-            "conversationId": self.conversation_id,
+            "url": redact(self.url),
+            "title": redact(self.title),
+            "conversationId": redact(self.conversation_id),
             "tabId": self.tab_id,
-            "pageSessionId": self.page_session_id,
-            "userText": self.user_text,
-            "assistantText": self.assistant_text,
+            "pageSessionId": redact(self.page_session_id),
+            "userText": redact(self.user_text),
+            "assistantText": redact(self.assistant_text),
             "userTextHash": self.user_text_hash,
             "assistantTextHash": self.assistant_text_hash,
-            "modelLabel": self.model_label,
-            "errorText": self.error_text,
+            "modelLabel": redact(self.model_label),
+            "errorText": redact(self.error_text),
             "observedAt": self.observed_at,
-            "signals": self.signals,
+            "signals": redact_nested(self.signals or {}),
         }
 
 

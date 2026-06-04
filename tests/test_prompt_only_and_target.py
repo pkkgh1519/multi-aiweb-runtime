@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -342,6 +344,321 @@ class OracleManualLoginSetupTests(unittest.TestCase):
             thinking_index = captured_command.index("--browser-thinking-time")
             self.assertEqual(captured_command[thinking_index + 1], "heavy")
             self.assertEqual(captured_kwargs["timeout"], 4200)
+
+
+class RedactionTests(unittest.TestCase):
+    def test_redacts_common_secret_shapes(self) -> None:
+        from chatgpt_web_runtime.redaction import contains_secret_risk, redact
+
+        samples = [
+            "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456",
+            "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz1234567890",
+            "github=ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+            "Cookie: __Secure-next-auth.session-token=sensitive-cookie-value",
+            '{"access_token":"abcdefghijklmnopqrstuvwxyz1234567890"}',
+        ]
+        for sample in samples:
+            self.assertTrue(contains_secret_risk(sample), sample)
+            redacted = redact(sample)
+            self.assertNotIn("abcdefghijklmnopqrstuvwxyz", redacted)
+            self.assertNotIn("sensitive-cookie-value", redacted)
+            self.assertIn("[REDACTED", redacted)
+
+    def test_runtime_events_are_redacted_before_jsonl(self) -> None:
+        from chatgpt_web_runtime.event_model import RuntimeEvent
+
+        event = RuntimeEvent(
+            event_id=1,
+            run_id="redact-smoke",
+            status="done",
+            user_text="OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz1234567890",
+            assistant_text="Cookie: __Secure-next-auth.session-token=sensitive-cookie-value",
+            signals={"auth": "Bearer abcdefghijklmnopqrstuvwxyz123456"},
+        )
+
+        payload = json.dumps(event.to_dict(), ensure_ascii=False)
+        self.assertNotIn("sk-proj-abcdefghijklmnopqrstuvwxyz", payload)
+        self.assertNotIn("sensitive-cookie-value", payload)
+        self.assertNotIn("Bearer abcdefghijklmnopqrstuvwxyz", payload)
+        self.assertIn("[REDACTED", payload)
+
+
+class RuntimeCompletionGuardTests(unittest.TestCase):
+    def test_start_run_records_prompt_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(question="hash me", dry_run=True)
+            run_json = Path(result["artifact_paths"]["run"])
+            payload = json.loads(run_json.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["prompt_hash"]), 64)
+            self.assertEqual(payload["prompt_hash_algorithm"], "sha256")
+            self.assertEqual(payload["state_history"], [])
+            self.assertFalse(payload["recoverable"])
+
+    def test_complete_run_rejects_terminal_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(question="already done", dry_run=True)
+            with self.assertRaisesRegex(ValueError, "terminal"):
+                runtime.complete_run(result["run_id"], response_text="overwrite")
+
+    def test_complete_run_rejects_all_existing_terminal_statuses(self) -> None:
+        terminal_statuses = ("user_action_required", "watch_lost", "policy_preview", "policy_blocked", "cancelled")
+        for terminal_status in terminal_statuses:
+            with tempfile.TemporaryDirectory() as tmp:
+                runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+                result = runtime.start_run(question=f"terminal {terminal_status}", live=False)
+                artifacts = runtime._artifacts(result["run_id"])
+                status = json.loads(artifacts.status_json.read_text(encoding="utf-8"))
+                status.update({"status": terminal_status, "phase": terminal_status.upper()})
+                artifacts.status_json.write_text(json.dumps(status), encoding="utf-8")
+
+                with self.assertRaisesRegex(ValueError, "terminal"):
+                    runtime.complete_run(result["run_id"], response_text="overwrite")
+
+    def test_status_updates_append_state_history_and_recoverability(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(question="history", dry_run=True)
+            artifacts = runtime._artifacts(result["run_id"])
+
+            runtime._write_status_and_update_run(
+                artifacts,
+                {
+                    "run_id": result["run_id"],
+                    "status": "running",
+                    "phase": "REATTACH_REQUIRED",
+                    "updated_at": "2026-06-05T00:00:00+00:00",
+                },
+            )
+
+            run_payload = json.loads(artifacts.run_json.read_text(encoding="utf-8"))
+            self.assertTrue(run_payload["recoverable"])
+            self.assertEqual(run_payload["state_history"][-1]["status"], "running")
+            self.assertEqual(run_payload["state_history"][-1]["phase"], "REATTACH_REQUIRED")
+
+
+class ExternalCompletionEvidenceTests(unittest.TestCase):
+    def test_complete_run_requires_evidence_for_external_browser_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(
+                question="external prompt",
+                live=True,
+                browser_backend=PLAYWRIGHT_MCP_BACKEND,
+                oracle_target=CHATGPT_BROWSER_TARGET,
+            )
+            with self.assertRaisesRegex(ValueError, "completion evidence"):
+                runtime.complete_run(result["run_id"], response_text="answer without evidence")
+
+    def test_complete_run_rejects_empty_external_response(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(
+                question="external prompt",
+                live=True,
+                browser_backend=PLAYWRIGHT_MCP_BACKEND,
+                oracle_target=CHATGPT_BROWSER_TARGET,
+            )
+            run_payload = json.loads(Path(result["artifact_paths"]["run"]).read_text(encoding="utf-8"))
+            with self.assertRaisesRegex(ValueError, "response_text"):
+                runtime.complete_run(
+                    result["run_id"],
+                    response_text="",
+                    evidence={
+                        "run_id": result["run_id"],
+                        "oracle_provider": "chatgpt",
+                        "oracle_target": "chatgpt_browser",
+                        "url": "https://chatgpt.com/c/test-conversation",
+                        "conversation_id": "test-conversation",
+                        "prompt_hash": run_payload["prompt_hash"],
+                        "final_status": "done",
+                    },
+                )
+
+    def test_complete_run_accepts_matching_external_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(
+                question="external prompt",
+                live=True,
+                browser_backend=PLAYWRIGHT_MCP_BACKEND,
+                oracle_target=CHATGPT_BROWSER_TARGET,
+            )
+            run_payload = json.loads(Path(result["artifact_paths"]["run"]).read_text(encoding="utf-8"))
+            completed = runtime.complete_run(
+                result["run_id"],
+                response_text="external answer",
+                evidence={
+                    "run_id": result["run_id"],
+                    "oracle_provider": "chatgpt",
+                    "oracle_target": "chatgpt_browser",
+                    "url": "https://chatgpt.com/c/test-conversation",
+                    "conversation_id": "test-conversation",
+                    "prompt_hash": run_payload["prompt_hash"],
+                    "final_status": "done",
+                },
+            )
+            self.assertEqual(completed["status"], "completed")
+
+
+class ChatGptProClassificationTests(unittest.TestCase):
+    def _run_with_error(self, stderr: str) -> dict[str, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp)
+            response_path = state_root / "runs" / "pro" / "response.md"
+            response_path.parent.mkdir(parents=True)
+            client = FakeOracleClient()
+            client.result = OracleCommandResult(
+                exit_code=1,
+                stdout="",
+                stderr=stderr,
+                output_text="",
+                command=["oracle"],
+                output_path=response_path,
+                engine_identity={"source": "fake"},
+            )
+            adapter = OracleAdapter(client=client)
+            result = adapter.run(
+                prompt="pro prompt",
+                files=[],
+                repo_root=None,
+                permission_level="safe_default",
+                mode_label="Pro Extended",
+                mode_variant="heavy",
+                response_path=response_path,
+                timeout_seconds=3600,
+                oracle_target=CHATGPT_BROWSER_TARGET,
+            )
+            return {"status": result.status, "phase": result.phase, "message": result.message}
+
+    def test_classifies_model_selector_missing(self) -> None:
+        result = self._run_with_error("Unable to locate the ChatGPT model selector button.")
+        self.assertEqual(result["status"], "user_action_required")
+        self.assertEqual(result["phase"], "MODEL_SELECTOR_UNAVAILABLE")
+
+    def test_classifies_pro_effort_unconfirmed(self) -> None:
+        result = self._run_with_error("refusing to submit without confirmed Pro Extended")
+        self.assertEqual(result["status"], "user_action_required")
+        self.assertEqual(result["phase"], "PRO_EFFORT_UNCONFIRMED")
+
+    def test_classifies_long_thinking_timeout(self) -> None:
+        result = self._run_with_error("Assistant response timed out before completion; reattach later to capture the answer.")
+        self.assertEqual(result["status"], "running")
+        self.assertEqual(result["phase"], "REATTACH_REQUIRED")
+
+    def test_classifies_real_timeout_with_thinking_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp)
+            response_path = state_root / "runs" / "pro-timeout" / "response.md"
+            response_path.parent.mkdir(parents=True)
+            client = FakeOracleClient()
+            client.result = OracleCommandResult(
+                exit_code=124,
+                stdout="[browser] ChatGPT thinking - 5m elapsed",
+                stderr="Oracle timed out.",
+                output_text="",
+                command=["oracle"],
+                output_path=response_path,
+                timed_out=True,
+                engine_identity={"source": "fake"},
+            )
+            adapter = OracleAdapter(client=client)
+            result = adapter.run(
+                prompt="pro prompt",
+                files=[],
+                repo_root=None,
+                permission_level="safe_default",
+                mode_label="Pro Extended",
+                mode_variant="heavy",
+                response_path=response_path,
+                timeout_seconds=3600,
+                oracle_target=CHATGPT_BROWSER_TARGET,
+            )
+            self.assertEqual(result.status, "running")
+            self.assertEqual(result.phase, "LONG_THINKING_IN_PROGRESS")
+
+    def test_classifies_incomplete_capture(self) -> None:
+        result = self._run_with_error("response status incomplete; incompleteReason=incomplete-capture")
+        self.assertEqual(result["status"], "running")
+        self.assertEqual(result["phase"], "CAPTURE_INCOMPLETE")
+
+    def test_classifies_prompt_not_submitted(self) -> None:
+        result = self._run_with_error("Prompt did not appear in conversation before timeout")
+        self.assertEqual(result["status"], "user_action_required")
+        self.assertEqual(result["phase"], "PROMPT_NOT_SUBMITTED")
+
+
+class ManualLoginLogSafetyTests(unittest.TestCase):
+    def test_manual_login_setup_does_not_capture_child_secret_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            captured_kwargs: dict[str, Any] = {}
+
+            class FakeProcess:
+                pid = 12345
+
+            def fake_popen(command: Sequence[str], **kwargs: Any) -> FakeProcess:
+                captured_kwargs.update(kwargs)
+                return FakeProcess()
+
+            client = OracleClient(
+                command=("python", "-P", "-m", "multi_aiweb_runtime.oracle_engine_cli"),
+                oracle_home_dir=root / "oracle",
+            )
+            original_popen = subprocess.Popen
+            try:
+                subprocess.Popen = fake_popen  # type: ignore[assignment]
+                launch = client.launch_manual_login_setup(cwd=root, oracle_target=CHATGPT_BROWSER_TARGET)
+            finally:
+                subprocess.Popen = original_popen  # type: ignore[assignment]
+
+            self.assertEqual(captured_kwargs["stdout"], DEVNULL)
+            self.assertEqual(captured_kwargs["stderr"], DEVNULL)
+            self.assertTrue(launch.stdout_path.name.endswith(".log"))
+            self.assertFalse(launch.stdout_path.exists())
+            self.assertFalse(launch.stderr_path.exists())
+
+
+class ResumeGuidanceTests(unittest.TestCase):
+    def test_resume_guidance_for_model_selector_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(question="selector", dry_run=True)
+            artifacts = runtime._artifacts(result["run_id"])
+            status = json.loads(artifacts.status_json.read_text(encoding="utf-8"))
+            status.update({"status": "user_action_required", "phase": "MODEL_SELECTOR_UNAVAILABLE"})
+            artifacts.status_json.write_text(json.dumps(status), encoding="utf-8")
+
+            resume = runtime.run_resume(result["run_id"])
+            self.assertEqual(resume["next_action"], "use_playwright_mcp")
+            self.assertIn("model selector", resume["message"].lower())
+
+    def test_resume_guidance_for_reattach_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(question="reattach", dry_run=True)
+            artifacts = runtime._artifacts(result["run_id"])
+            status = json.loads(artifacts.status_json.read_text(encoding="utf-8"))
+            status.update({"status": "running", "phase": "REATTACH_REQUIRED"})
+            artifacts.status_json.write_text(json.dumps(status), encoding="utf-8")
+
+            resume = runtime.run_resume(result["run_id"])
+            self.assertEqual(resume["next_action"], "inspect_artifacts")
+            self.assertIn("reattach", resume["message"].lower())
+
+    def test_resume_guidance_for_capture_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(question="capture", dry_run=True)
+            artifacts = runtime._artifacts(result["run_id"])
+            status = json.loads(artifacts.status_json.read_text(encoding="utf-8"))
+            status.update({"status": "running", "phase": "CAPTURE_INCOMPLETE"})
+            artifacts.status_json.write_text(json.dumps(status), encoding="utf-8")
+
+            resume = runtime.run_resume(result["run_id"])
+            self.assertEqual(resume["next_action"], "inspect_artifacts")
+            self.assertIn("capture", resume["message"].lower())
 
 
 if __name__ == "__main__":
