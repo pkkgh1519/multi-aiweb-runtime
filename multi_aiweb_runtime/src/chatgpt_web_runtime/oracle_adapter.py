@@ -270,7 +270,7 @@ def _failure_message(prefix: str, command_result: OracleCommandResult) -> str:
 
 def _classify_chatgpt_pro_failure(message: str) -> tuple[str, str] | None:
     lowered = message.lower()
-    if "chatgpt thinking" in lowered or "pro thinking" in lowered:
+    if "long_thinking_in_progress" in lowered or "chatgpt thinking" in lowered or "pro thinking" in lowered:
         return "running", "LONG_THINKING_IN_PROGRESS"
     if "model_selector_unavailable" in lowered or "unable to locate the chatgpt model selector button" in lowered:
         return "user_action_required", "MODEL_SELECTOR_UNAVAILABLE"
@@ -280,11 +280,11 @@ def _classify_chatgpt_pro_failure(message: str) -> tuple[str, str] | None:
         return "user_action_required", "PRO_EFFORT_UNCONFIRMED"
     if "assistant response timed out before completion" in lowered or "reattach later" in lowered:
         return "running", "REATTACH_REQUIRED"
-    if "incomplete-capture" in lowered or "capture incomplete" in lowered:
+    if "capture_incomplete" in lowered or "incomplete-capture" in lowered or "capture incomplete" in lowered:
         return "running", "CAPTURE_INCOMPLETE"
-    if "prompt did not appear in conversation" in lowered:
+    if "prompt_not_submitted" in lowered or "prompt did not appear in conversation" in lowered:
         return "user_action_required", "PROMPT_NOT_SUBMITTED"
-    if "chrome window closed" in lowered or "econnrefused" in lowered:
+    if "profile_busy" in lowered or "stale_devtools_port" in lowered or "chrome window closed" in lowered or "econnrefused" in lowered:
         return "user_action_required", "PROFILE_BUSY"
     if "login" in lowered and "required" in lowered:
         return "user_action_required", "LOGIN_REQUIRED"

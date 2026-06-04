@@ -68,7 +68,8 @@ export function registerTerminationHooks(chrome, userDataDir, keepBrowser, logge
                 }
                 if (opts?.preserveUserDataDir) {
                     // Preserve the profile directory (manual login), but clear reattach hints so we don't
-                    // STALE_DEVTOOLS_PORT: try to reuse a dead DevTools port on the next run.
+                    // try to reuse a dead DevTools port on the next run.
+                    logger("STALE_DEVTOOLS_PORT: clearing stale profile state for preserved manual-login profile after Chrome termination.");
                     await cleanupStaleProfileState(userDataDir, logger, { lockRemovalMode: "never" }).catch(() => undefined);
                 }
                 else {

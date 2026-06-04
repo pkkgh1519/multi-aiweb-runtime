@@ -353,6 +353,8 @@ class RedactionTests(unittest.TestCase):
         samples = [
             "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456",
             "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz1234567890",
+            "token=abcdefghijklmnopqrstuvwxyz123456",
+            "auth_token=abcdefghijklmnopqrstuvwxyz123456",
             "github=ghp_abcdefghijklmnopqrstuvwxyz1234567890",
             "Cookie: __Secure-next-auth.session-token=sensitive-cookie-value",
             '{"access_token":"abcdefghijklmnopqrstuvwxyz1234567890"}',
@@ -392,6 +394,7 @@ class RuntimeCompletionGuardTests(unittest.TestCase):
             payload = json.loads(run_json.read_text(encoding="utf-8"))
             self.assertEqual(len(payload["prompt_hash"]), 64)
             self.assertEqual(payload["prompt_hash_algorithm"], "sha256")
+            self.assertEqual(payload["hash_algorithm"], "sha256")
             self.assertEqual(payload["state_history"], [])
             self.assertFalse(payload["recoverable"])
 
@@ -402,8 +405,8 @@ class RuntimeCompletionGuardTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "terminal"):
                 runtime.complete_run(result["run_id"], response_text="overwrite")
 
-    def test_complete_run_rejects_all_existing_terminal_statuses(self) -> None:
-        terminal_statuses = ("user_action_required", "watch_lost", "policy_preview", "policy_blocked", "cancelled")
+    def test_complete_run_rejects_all_existing_nonrecoverable_terminal_statuses(self) -> None:
+        terminal_statuses = ("watch_lost", "policy_preview", "policy_blocked", "cancelled")
         for terminal_status in terminal_statuses:
             with tempfile.TemporaryDirectory() as tmp:
                 runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
@@ -415,6 +418,36 @@ class RuntimeCompletionGuardTests(unittest.TestCase):
 
                 with self.assertRaisesRegex(ValueError, "terminal"):
                     runtime.complete_run(result["run_id"], response_text="overwrite")
+
+    def test_complete_run_allows_recoverable_user_action_required_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(
+                question="selector",
+                live=True,
+                browser_backend=PLAYWRIGHT_MCP_BACKEND,
+                oracle_target=CHATGPT_BROWSER_TARGET,
+            )
+            artifacts = runtime._artifacts(result["run_id"])
+            status = json.loads(artifacts.status_json.read_text(encoding="utf-8"))
+            status.update({"status": "user_action_required", "phase": "MODEL_SELECTOR_UNAVAILABLE"})
+            artifacts.status_json.write_text(json.dumps(status), encoding="utf-8")
+            run_payload = json.loads(artifacts.run_json.read_text(encoding="utf-8"))
+
+            completed = runtime.complete_run(
+                result["run_id"],
+                response_text="recovered answer",
+                evidence={
+                    "run_id": result["run_id"],
+                    "oracle_provider": "chatgpt",
+                    "oracle_target": "chatgpt_browser",
+                    "url": "https://chatgpt.com/c/test-conversation",
+                    "conversation_id": "test-conversation",
+                    "prompt_hash": run_payload["prompt_hash"],
+                    "final_status": "done",
+                },
+            )
+            self.assertEqual(completed["status"], "completed")
 
     def test_status_updates_append_state_history_and_recoverability(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -495,6 +528,30 @@ class ExternalCompletionEvidenceTests(unittest.TestCase):
                     "oracle_target": "chatgpt_browser",
                     "url": "https://chatgpt.com/c/test-conversation",
                     "conversation_id": "test-conversation",
+                    "prompt_hash": run_payload["prompt_hash"],
+                    "final_status": "done",
+                },
+            )
+            self.assertEqual(completed["status"], "completed")
+
+    def test_complete_run_accepts_matching_gemini_external_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(
+                question="gemini external prompt",
+                live=True,
+                browser_backend=PLAYWRIGHT_MCP_BACKEND,
+                oracle_target=GEMINI_BROWSER_TARGET,
+            )
+            run_payload = json.loads(Path(result["artifact_paths"]["run"]).read_text(encoding="utf-8"))
+            completed = runtime.complete_run(
+                result["run_id"],
+                response_text="gemini external answer",
+                evidence={
+                    "run_id": result["run_id"],
+                    "oracle_provider": "gemini",
+                    "oracle_target": "gemini_browser",
+                    "url": "https://gemini.google.com/app/test-conversation",
                     "prompt_hash": run_payload["prompt_hash"],
                     "final_status": "done",
                 },
@@ -587,6 +644,18 @@ class ChatGptProClassificationTests(unittest.TestCase):
         result = self._run_with_error("Prompt did not appear in conversation before timeout")
         self.assertEqual(result["status"], "user_action_required")
         self.assertEqual(result["phase"], "PROMPT_NOT_SUBMITTED")
+
+    def test_classifies_direct_oracle_markers(self) -> None:
+        cases = {
+            "LONG_THINKING_IN_PROGRESS: Auto-reattach will continue": ("running", "LONG_THINKING_IN_PROGRESS"),
+            "PROMPT_NOT_SUBMITTED: Chrome disconnected before a ChatGPT conversation was created": ("user_action_required", "PROMPT_NOT_SUBMITTED"),
+            "CAPTURE_INCOMPLETE: Assistant response timed out": ("running", "CAPTURE_INCOMPLETE"),
+            "PROFILE_BUSY: Chrome pid 123 still alive": ("user_action_required", "PROFILE_BUSY"),
+            "STALE_DEVTOOLS_PORT: DevTools port 9222 unreachable": ("user_action_required", "PROFILE_BUSY"),
+        }
+        for message, expected in cases.items():
+            result = self._run_with_error(message)
+            self.assertEqual((result["status"], result["phase"]), expected)
 
 
 class ManualLoginLogSafetyTests(unittest.TestCase):

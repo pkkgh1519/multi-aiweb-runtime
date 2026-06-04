@@ -103,7 +103,7 @@ class ChatGptWebRuntime:
             return
         status_payload = read_json(artifacts.status_json)
         status = str(status_payload.get("status") or "")
-        if status_is_terminal(status):
+        if status_is_terminal(status) and not self._status_payload_recoverable(status_payload):
             raise ValueError(f"Cannot update terminal run status: {status}")
 
     @staticmethod
@@ -250,17 +250,23 @@ class ChatGptWebRuntime:
             raise ValueError(f"Missing completion evidence: {', '.join(missing)}")
         if str(payload.get("run_id")) != run_id:
             raise ValueError("External completion evidence run_id mismatch")
-        if payload.get("oracle_provider") != "chatgpt":
-            raise ValueError("External completion evidence must identify chatgpt provider")
-        if payload.get("oracle_target") != "chatgpt_browser":
-            raise ValueError("External completion evidence must identify chatgpt_browser target")
+        expected_target = str(run_payload.get("oracle_target") or DEFAULT_ORACLE_TARGET)
+        expected_provider = oracle_target_provider(expected_target)
+        if str(payload.get("oracle_provider")) != expected_provider:
+            raise ValueError(f"External completion evidence must identify {expected_provider} provider")
+        if str(payload.get("oracle_target")) != expected_target:
+            raise ValueError(f"External completion evidence must identify {expected_target} target")
         if str(payload.get("prompt_hash")) != str(run_payload.get("prompt_hash")):
             raise ValueError("External completion evidence prompt_hash mismatch")
         url = str(payload.get("url") or "")
-        if "chatgpt.com" not in url:
-            raise ValueError("External completion evidence must include a ChatGPT URL")
-        if "/c/" not in url and not payload.get("conversation_id"):
-            raise ValueError("External completion evidence must include a conversation URL or conversation_id")
+        if expected_provider == "chatgpt":
+            if "chatgpt.com" not in url:
+                raise ValueError("External completion evidence must include a ChatGPT URL")
+            if "/c/" not in url and not payload.get("conversation_id"):
+                raise ValueError("External completion evidence must include a conversation URL or conversation_id")
+        elif expected_provider == "gemini":
+            if "gemini.google.com" not in url:
+                raise ValueError("External completion evidence must include a Gemini URL")
         if str(payload.get("final_status")).lower() not in {"done", "completed"}:
             raise ValueError("External completion evidence final_status must be done or completed")
         return self._redact_nested(payload)
@@ -450,6 +456,7 @@ class ChatGptWebRuntime:
             "question_chars": len(question),
             "prompt_hash": self._prompt_hash(question),
             "prompt_hash_algorithm": "sha256",
+            "hash_algorithm": "sha256",
             "state_history": [],
             "recoverable": False,
             "files": files or [],

@@ -16,7 +16,7 @@ describe("Oracle browser reliability markers", () => {
     expect(profileState).toContain("PROFILE_BUSY");
     expect(profileState).toContain("STALE_DEVTOOLS_PORT");
     expect(chromeLifecycle).toContain("PROFILE_BUSY");
-    expect(chromeLifecycle).toContain("STALE_DEVTOOLS_PORT");
+    expect(chromeLifecycle).toContain('logger("STALE_DEVTOOLS_PORT');
   });
 
   test("session runner exposes classifiable Pro long-running states", () => {

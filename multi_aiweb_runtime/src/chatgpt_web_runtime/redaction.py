@@ -7,7 +7,7 @@ _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[A-Za-z0-9._~+/=-]{16,}"),
     re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}"),
     re.compile(
-        r"(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|secret|password)\s*[=:]\s*)['\"]?[A-Za-z0-9._~+/=-]{8,}['\"]?"
+        r"(?i)((?:api[_-]?key|(?:auth[_-]?)?token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|secret|password)\s*[=:]\s*)['\"]?[A-Za-z0-9._~+/=-]{8,}['\"]?"
     ),
     re.compile(r"(?i)(\"(?:access_token|refresh_token|id_token|session_token)\"\s*:\s*\")[^\"]{8,}(\")"),
     re.compile(r"(?i)(cookie\s*:\s*)[^\r\n]{8,}"),
