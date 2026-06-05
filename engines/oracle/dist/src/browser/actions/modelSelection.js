@@ -190,24 +190,33 @@ function buildModelSelectionExpression(targetModel, strategy) {
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     };
     const looksLikeModelPill = (node) => {
-      if (!(node instanceof HTMLElement) || !node.matches('button.__composer-pill')) return false;
+      if (!(node instanceof HTMLElement)) return false;
       if (!isVisibleElement(node)) return false;
+      if (node.matches('button[data-testid="composer-plus-btn"], button.composer-btn')) return false;
       const label = normalizeText(
         (node.textContent ?? '') + ' ' + (node.getAttribute('aria-label') ?? '') + ' ' + (node.getAttribute('title') ?? '')
       );
       if (!label) return false;
       if (label.includes('click to remove')) return false;
+      const rawLabel = (
+        (node.textContent ?? '') + ' ' + (node.getAttribute('aria-label') ?? '') + ' ' + (node.getAttribute('title') ?? '')
+      ).toLowerCase();
+      const localizedModelTokens = ['모델', '프로', '확장'];
       const modelTokens = ['chatgpt', 'gpt', 'instant', 'thinking', 'pro', 'extended', 'standard', 'heavy', 'light'];
+      if (localizedModelTokens.some((token) => rawLabel.includes(token))) return true;
       return modelTokens.some((token) => hasToken(label, token));
     };
     const findModelButton = () => {
       const explicit = document.querySelector(BUTTON_SELECTOR);
       if (explicit) return explicit;
-      return Array.from(document.querySelectorAll('button.__composer-pill')).find(looksLikeModelPill) ?? null;
+      return Array.from(document.querySelectorAll('button.__composer-pill, button[aria-haspopup="menu"], [role="button"][aria-haspopup="menu"]')).find(looksLikeModelPill) ?? null;
     };
 
     const button = findModelButton();
     if (!button) {
+      if (MODEL_STRATEGY === 'current') {
+        return { status: 'already-selected', label: PRIMARY_LABEL };
+      }
       return { status: 'button-missing', marker: MODEL_SELECTOR_UNAVAILABLE_MARKER };
     }
 
