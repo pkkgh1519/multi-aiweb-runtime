@@ -119,6 +119,7 @@ class ChatGptWebRuntime:
             "PRO_NOT_AVAILABLE",
             "PRO_EFFORT_UNCONFIRMED",
             "PROMPT_NOT_SUBMITTED",
+            "CHROME_NOT_FOUND",
             "LONG_THINKING_IN_PROGRESS",
             "REATTACH_REQUIRED",
             "CAPTURE_INCOMPLETE",
@@ -273,6 +274,10 @@ class ChatGptWebRuntime:
 
     def _resume_guidance_for_phase(self, status_payload: dict[str, Any]) -> tuple[str, str]:
         phase = str(status_payload.get("phase") or "")
+        provider = str(status_payload.get("oracle_provider") or "").lower()
+        target = str(status_payload.get("oracle_target") or DEFAULT_ORACLE_TARGET)
+        provider_label = "Gemini" if provider == "gemini" or target == "gemini_browser" else "ChatGPT"
+        target_arg = "gemini_browser" if provider_label == "Gemini" else "chatgpt_browser"
         if phase == "MODEL_SELECTOR_UNAVAILABLE":
             return (
                 "use_playwright_mcp",
@@ -291,12 +296,17 @@ class ChatGptWebRuntime:
         if phase == "PROFILE_BUSY":
             return (
                 "close_conflicting_browser",
-                "The Oracle ChatGPT profile is busy or has an unreachable DevTools port. Close Chrome windows using the Oracle profile, then retry prepare_session or run_start.",
+                f"The Oracle {provider_label} profile is busy or has an unreachable DevTools port. Close Chrome windows using the Oracle profile, then retry prepare_session or run_start.",
             )
         if phase == "LOGIN_REQUIRED":
             return (
                 "run_oracle_manual_login_setup",
-                "The ChatGPT browser profile is not logged in. Run aiweb_prepare_session with browser_backend='oracle', oracle_target='chatgpt_browser', open_browser=true.",
+                f"The {provider_label} browser profile is not logged in. Run aiweb_prepare_session with browser_backend='oracle', oracle_target='{target_arg}', open_browser=true.",
+            )
+        if phase == "CHROME_NOT_FOUND":
+            return (
+                "configure_chrome_path",
+                "Oracle could not locate a Chrome or Chromium browser. Install Chrome, or ensure the standard Windows Chrome path is available before retrying prepare_session or run_start.",
             )
         if phase == "REATTACH_REQUIRED":
             return (
@@ -326,6 +336,33 @@ class ChatGptWebRuntime:
         profile_dir = self.config.profile_dir(profile_name)
         profile_dir.mkdir(parents=True, exist_ok=True)
         if dry_run:
+            if backend in {ORACLE_BACKEND, PLAYWRIGHT_MCP_BACKEND}:
+                target = normalize_oracle_target(oracle_target)
+                provider = oracle_target_provider(target)
+                payload = {
+                    "ok": True,
+                    "auth_state": "ready",
+                    "next_action": "continue",
+                    "profile_dir": str(profile_dir),
+                    "chat_url": oracle_target_chat_url(target),
+                    "browser_backend": backend,
+                    "oracle_target": target,
+                    "oracle_provider": provider,
+                    "message": "Dry-run session is ready.",
+                }
+                if backend == ORACLE_BACKEND:
+                    oracle_home_base = self.config.oracle_home_dir or (self.config.state_root / "oracle")
+                    oracle_home = oracle_target_home_dir(oracle_home_base, target)
+                    oracle_profile = oracle_target_profile_dir(oracle_home_base, target)
+                    payload.update(
+                        {
+                            "profile_dir": str(oracle_profile.resolve()),
+                            "codex_profile_dir": str(profile_dir),
+                            "oracle_home_dir": str(oracle_home.resolve()),
+                            "oracle_profile_dir": str(oracle_profile.resolve()),
+                        }
+                    )
+                return payload
             return {
                 "ok": True,
                 "auth_state": "ready",
@@ -350,7 +387,8 @@ class ChatGptWebRuntime:
                 "ok": False,
                 "auth_state": "user_action_required",
                 "next_action": "run_oracle_manual_login_setup",
-                "profile_dir": str(profile_dir),
+                "profile_dir": str(oracle_profile.resolve()),
+                "codex_profile_dir": str(profile_dir),
                 "oracle_home_dir": str(oracle_home.resolve()),
                 "oracle_profile_dir": str(oracle_profile.resolve()),
                 "oracle_target": target,
@@ -538,7 +576,14 @@ class ChatGptWebRuntime:
                 "updated_at": now_iso(),
                 "message": "Live ChatGPT Web execution requires prepare_session and browser backend enablement.",
             }
-        run_payload.update({"status": status_payload["status"], "phase": status_payload["phase"], "updated_at": status_payload["updated_at"]})
+        run_payload.update(
+            {
+                "status": status_payload["status"],
+                "phase": status_payload["phase"],
+                "updated_at": status_payload["updated_at"],
+                "recoverable": self._status_payload_recoverable(status_payload),
+            }
+        )
         for key in ("oracle_scope", "oracle_target", "oracle_provider", "oracle_model", "oracle_thinking_time", "oracle_engine"):
             if key in status_payload:
                 run_payload[key] = status_payload[key]

@@ -160,6 +160,7 @@ class OracleClient:
         oracle_target: str = DEFAULT_ORACLE_TARGET,
         oracle_model: str | None = None,
         mode_label: str = "",
+        base_env: Mapping[str, str] | None = None,
     ) -> list[str]:
         target = normalize_oracle_target(oracle_target)
         resolved_model = resolve_oracle_model(
@@ -181,6 +182,9 @@ class OracleClient:
             "--browser-archive",
             "never",
         ]
+        chrome_path = detect_default_chrome_path(base_env)
+        if chrome_path:
+            command.extend(["--browser-chrome-path", chrome_path])
         if target == CHATGPT_BROWSER_TARGET:
             command.extend(["--browser-model-strategy", "current"])
         elif target == GEMINI_BROWSER_TARGET:
@@ -210,6 +214,7 @@ class OracleClient:
             oracle_target=target,
             oracle_model=oracle_model,
             mode_label=mode_label,
+            base_env=base_env,
         )
         creationflags = 0
         if os.name == "nt":
@@ -280,6 +285,7 @@ class OracleClient:
             resolved_model=resolved_model,
             thinking_time=thinking_time,
             dry_run=dry_run,
+            base_env=base_env,
         )
         browser_timeout = max(
             int(timeout_seconds or 1),
@@ -369,6 +375,7 @@ class OracleClient:
         resolved_model: str | None,
         thinking_time: str,
         dry_run: bool,
+        base_env: Mapping[str, str] | None = None,
     ) -> list[str]:
         pro_extended = str(mode_label).strip().lower() == PRO_EXTENDED_MODE_LABEL.lower()
         browser_timeout = max(int(timeout_seconds or 1), PRO_EXTENDED_MIN_BROWSER_TIMEOUT_SECONDS if pro_extended else 1)
@@ -391,6 +398,9 @@ class OracleClient:
             "--browser-timeout",
             f"{browser_timeout}s",
         ]
+        chrome_path = detect_default_chrome_path(base_env)
+        if chrome_path:
+            command.extend(["--browser-chrome-path", chrome_path])
         if oracle_target == CHATGPT_BROWSER_TARGET:
             command.extend(
                 [
@@ -462,6 +472,46 @@ def validate_oracle_command(command: Sequence[str]) -> tuple[str, ...]:
         if any(option_name_lower.startswith(prefix) for prefix in _FORBIDDEN_BASE_OPTION_PREFIXES):
             raise ValueError(f"Forbidden Oracle command token: {token}")
     return normalized
+
+
+def detect_default_chrome_path(base_env: Mapping[str, str] | None = None, *, platform: str | None = None) -> str | None:
+    current_platform = (platform or os.name).lower()
+    if current_platform not in {"nt", "win32"}:
+        return None
+    source = dict(base_env or os.environ)
+    program_files = _env_get(source, "ProgramFiles") or r"C:\Program Files"
+    program_files_x86 = _env_get(source, "ProgramFiles(x86)") or r"C:\Program Files (x86)"
+    local_app_data = _env_get(source, "LOCALAPPDATA")
+    if not local_app_data:
+        user_profile = _env_get(source, "USERPROFILE")
+        local_app_data = str(Path(user_profile) / "AppData" / "Local") if user_profile else None
+    candidates = [
+        Path(program_files) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        Path(program_files_x86) / "Google" / "Chrome" / "Application" / "chrome.exe",
+    ]
+    if local_app_data:
+        candidates.append(Path(local_app_data) / "Google" / "Chrome" / "Application" / "chrome.exe")
+    candidates.extend(
+        [
+            Path(program_files) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+            Path(program_files_x86) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+        ]
+    )
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return str(candidate)
+        except OSError:
+            continue
+    return None
+
+
+def _env_get(source: Mapping[str, str], key: str) -> str | None:
+    key_upper = key.upper()
+    for name, value in source.items():
+        if name.upper() == key_upper and str(value).strip():
+            return str(value)
+    return None
 
 
 def normalize_oracle_target(oracle_target: str | None = None) -> str:

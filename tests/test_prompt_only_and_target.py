@@ -7,7 +7,9 @@ import unittest
 from pathlib import Path
 from subprocess import DEVNULL, CompletedProcess, TimeoutExpired
 from typing import Any, Sequence
+from unittest.mock import patch
 
+from chatgpt_web_runtime import oracle_client as oracle_client_module
 from chatgpt_web_runtime.config import RuntimeConfig
 from chatgpt_web_runtime.oracle_adapter import OracleAdapter
 from chatgpt_web_runtime.oracle_client import (
@@ -191,6 +193,53 @@ class OracleManualLoginSetupTests(unittest.TestCase):
             self.assertNotIn("--browser-hide-window", command)
             self.assertEqual(command[-2:], ["-p", "HI"])
 
+    def test_gemini_manual_login_setup_passes_detected_chrome_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            chrome_path = str(Path(tmp) / "Google" / "Chrome" / "Application" / "chrome.exe")
+            client = OracleClient(
+                command=("python", "-P", "-m", "multi_aiweb_runtime.oracle_engine_cli"),
+                oracle_home_dir=Path(tmp) / "oracle",
+            )
+
+            with patch.object(oracle_client_module, "detect_default_chrome_path", return_value=chrome_path):
+                command = client.build_manual_login_setup_command(oracle_target=GEMINI_BROWSER_TARGET)
+
+            chrome_index = command.index("--browser-chrome-path")
+            self.assertEqual(command[chrome_index + 1], chrome_path)
+
+    def test_gemini_browser_run_passes_detected_chrome_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_path = root / "response.md"
+            chrome_path = str(root / "Google" / "Chrome" / "Application" / "chrome.exe")
+            captured_command: list[str] = []
+
+            def runner(command: Sequence[str], **kwargs: Any) -> CompletedProcess[str]:
+                captured_command.extend(command)
+                output_path.write_text("ok", encoding="utf-8")
+                return CompletedProcess(command, 0, stdout="", stderr="")
+
+            client = OracleClient(
+                command=("python", "-P", "-m", "multi_aiweb_runtime.oracle_engine_cli"),
+                oracle_home_dir=root / "oracle",
+                runner=runner,
+            )
+
+            with patch.object(oracle_client_module, "detect_default_chrome_path", return_value=chrome_path):
+                result = client.run_browser_consult(
+                    prompt="review this prompt",
+                    files=[],
+                    output_path=output_path,
+                    cwd=root,
+                    mode_label="Extension Heavy",
+                    timeout_seconds=30,
+                    oracle_target=GEMINI_BROWSER_TARGET,
+                )
+
+            self.assertEqual(result.exit_code, 0)
+            chrome_index = captured_command.index("--browser-chrome-path")
+            self.assertEqual(captured_command[chrome_index + 1], chrome_path)
+
     def test_prepare_session_oracle_returns_first_time_setup_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
@@ -207,6 +256,22 @@ class OracleManualLoginSetupTests(unittest.TestCase):
             self.assertIn("--browser-keep-browser", setup["command"])
             self.assertIn("--model", setup["command"])
             self.assertIn("gemini-3.1-pro", setup["command"])
+
+    def test_prepare_session_oracle_dry_run_is_target_aware_for_gemini(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+
+            result = runtime.prepare_session(
+                browser_backend=ORACLE_BACKEND,
+                oracle_target=GEMINI_BROWSER_TARGET,
+                dry_run=True,
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["oracle_target"], GEMINI_BROWSER_TARGET)
+            self.assertEqual(result["oracle_provider"], "gemini")
+            self.assertEqual(result["chat_url"], GEMINI_BROWSER_URL)
+            self.assertIn("gemini_browser", result["oracle_profile_dir"])
 
     def test_timeout_after_output_file_is_salvaged_as_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -652,10 +717,73 @@ class ChatGptProClassificationTests(unittest.TestCase):
             "CAPTURE_INCOMPLETE: Assistant response timed out": ("running", "CAPTURE_INCOMPLETE"),
             "PROFILE_BUSY: Chrome pid 123 still alive": ("user_action_required", "PROFILE_BUSY"),
             "STALE_DEVTOOLS_PORT: DevTools port 9222 unreachable": ("user_action_required", "PROFILE_BUSY"),
+            "ERROR: No Chrome installations found.": ("user_action_required", "CHROME_NOT_FOUND"),
         }
         for message, expected in cases.items():
             result = self._run_with_error(message)
             self.assertEqual((result["status"], result["phase"]), expected)
+
+
+class GeminiClassificationTests(unittest.TestCase):
+    def test_classifies_missing_chrome_as_user_action_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp)
+            response_path = state_root / "runs" / "gemini-chrome" / "response.md"
+            response_path.parent.mkdir(parents=True)
+            client = FakeOracleClient()
+            client.result = OracleCommandResult(
+                exit_code=1,
+                stdout="ERROR: No Chrome installations found. User error (browser-automation): No Chrome installations found.",
+                stderr="",
+                output_text="",
+                command=["oracle"],
+                output_path=response_path,
+                engine_identity={"source": "fake"},
+            )
+            adapter = OracleAdapter(client=client)
+
+            result = adapter.run(
+                prompt="gemini prompt",
+                files=[],
+                repo_root=None,
+                permission_level="safe_default",
+                mode_label="Extension Heavy",
+                response_path=response_path,
+                timeout_seconds=60,
+                oracle_target=GEMINI_BROWSER_TARGET,
+            )
+
+            self.assertEqual(result.status, "user_action_required")
+            self.assertEqual(result.phase, "CHROME_NOT_FOUND")
+
+    def test_start_run_marks_gemini_chrome_not_found_recoverable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp)
+            client = FakeOracleClient()
+            client.result = OracleCommandResult(
+                exit_code=1,
+                stdout="ERROR: No Chrome installations found.",
+                stderr="",
+                output_text="",
+                command=["oracle"],
+                engine_identity={"source": "fake"},
+            )
+            runtime = ChatGptWebRuntime(
+                config=RuntimeConfig(state_root=state_root),
+                oracle_adapter=OracleAdapter(client=client),
+            )
+
+            result = runtime.start_run(
+                question="gemini prompt",
+                live=True,
+                browser_backend=ORACLE_BACKEND,
+                oracle_target=GEMINI_BROWSER_TARGET,
+            )
+
+            run_payload = json.loads(Path(result["artifact_paths"]["run"]).read_text(encoding="utf-8"))
+            self.assertEqual(result["status"], "user_action_required")
+            self.assertEqual(result["phase"], "CHROME_NOT_FOUND")
+            self.assertTrue(run_payload["recoverable"])
 
 
 class ManualLoginLogSafetyTests(unittest.TestCase):
@@ -728,6 +856,19 @@ class ResumeGuidanceTests(unittest.TestCase):
             resume = runtime.run_resume(result["run_id"])
             self.assertEqual(resume["next_action"], "inspect_artifacts")
             self.assertIn("capture", resume["message"].lower())
+
+    def test_resume_guidance_for_chrome_not_found(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ChatGptWebRuntime(config=RuntimeConfig(state_root=Path(tmp)))
+            result = runtime.start_run(question="chrome", dry_run=True)
+            artifacts = runtime._artifacts(result["run_id"])
+            status = json.loads(artifacts.status_json.read_text(encoding="utf-8"))
+            status.update({"status": "user_action_required", "phase": "CHROME_NOT_FOUND"})
+            artifacts.status_json.write_text(json.dumps(status), encoding="utf-8")
+
+            resume = runtime.run_resume(result["run_id"])
+            self.assertEqual(resume["next_action"], "configure_chrome_path")
+            self.assertIn("chrome", resume["message"].lower())
 
 
 if __name__ == "__main__":

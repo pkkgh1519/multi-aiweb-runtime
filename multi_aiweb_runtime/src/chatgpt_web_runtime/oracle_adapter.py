@@ -156,7 +156,7 @@ class OracleAdapter:
                 command_result=command_result,
             )
         timeout_message = _failure_message("Oracle browser run timed out.", command_result)
-        timeout_classified = _classify_chatgpt_pro_failure(timeout_message) if target == DEFAULT_ORACLE_TARGET else None
+        timeout_classified = _classify_oracle_browser_failure(timeout_message, target=target)
         if command_result.timed_out and timeout_classified is not None:
             status, phase = timeout_classified
             return OracleRunResult(
@@ -185,7 +185,7 @@ class OracleAdapter:
                 command_result=command_result,
             )
         message = _failure_message("Oracle browser run failed.", command_result)
-        classified = _classify_chatgpt_pro_failure(message) if target == DEFAULT_ORACLE_TARGET else None
+        classified = _classify_oracle_browser_failure(message, target=target)
         if classified is not None:
             status, phase = classified
             return OracleRunResult(
@@ -268,6 +268,23 @@ def _failure_message(prefix: str, command_result: OracleCommandResult) -> str:
     return redact(prefix + " " + " ".join(details))
 
 
+def _classify_oracle_browser_failure(message: str, *, target: str) -> tuple[str, str] | None:
+    lowered = message.lower()
+    if (
+        "no chrome installations found" in lowered
+        or "no chrome installation detected" in lowered
+        or "browser engine unavailable: no chrome" in lowered
+    ):
+        return "user_action_required", "CHROME_NOT_FOUND"
+    if "profile_busy" in lowered or "stale_devtools_port" in lowered or "chrome window closed" in lowered or "econnrefused" in lowered:
+        return "user_action_required", "PROFILE_BUSY"
+    if "login" in lowered and "required" in lowered:
+        return "user_action_required", "LOGIN_REQUIRED"
+    if target == DEFAULT_ORACLE_TARGET:
+        return _classify_chatgpt_pro_failure(message)
+    return None
+
+
 def _classify_chatgpt_pro_failure(message: str) -> tuple[str, str] | None:
     lowered = message.lower()
     if "long_thinking_in_progress" in lowered or "chatgpt thinking" in lowered or "pro thinking" in lowered:
@@ -284,10 +301,6 @@ def _classify_chatgpt_pro_failure(message: str) -> tuple[str, str] | None:
         return "running", "CAPTURE_INCOMPLETE"
     if "prompt_not_submitted" in lowered or "prompt did not appear in conversation" in lowered:
         return "user_action_required", "PROMPT_NOT_SUBMITTED"
-    if "profile_busy" in lowered or "stale_devtools_port" in lowered or "chrome window closed" in lowered or "econnrefused" in lowered:
-        return "user_action_required", "PROFILE_BUSY"
-    if "login" in lowered and "required" in lowered:
-        return "user_action_required", "LOGIN_REQUIRED"
     return None
 
 

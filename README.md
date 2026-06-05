@@ -100,6 +100,18 @@ To install the plugin without Oracle dependencies, use:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -SkipOracleDeps
 ```
 
+### Oracle reports `No Chrome installations found`
+
+On Windows, the runtime passes the standard local Chrome or Chromium-family executable path to Oracle when it can detect one. If a run still reports `CHROME_NOT_FOUND`, install Chrome or verify that one of these paths exists before retrying:
+
+```text
+C:\Program Files\Google\Chrome\Application\chrome.exe
+C:\Program Files (x86)\Google\Chrome\Application\chrome.exe
+%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe
+```
+
+The run remains a user-action-required state and `aiweb_run_resume` reports the next action instead of treating the error as an opaque Oracle failure.
+
 ## Verify the install
 
 ```powershell
