@@ -9,6 +9,7 @@ Multi-AI Web Runtime is a local Codex plugin for user-mediated AI web browser se
 - File sharing is policy-gated before an Oracle-backed run starts.
 - Repo escapes, home-directory paths, Windows drive paths, `.env` files, private keys, cookie stores, and browser profile storage are rejected from file attachments.
 - Oracle browser targets use dedicated runtime state under the Codex state directory.
+- The plugin must not read `~/.codex/auth.json`, browser cookie stores, browser localStorage, or provider profile files. Web authentication remains user-mediated through dedicated browser profiles. A run may ask the user to log in, close a conflicting browser, or inspect a CAPTCHA/payment/security gate, but it must not bypass those gates or copy authentication material between profiles.
 
 ## Sensitive data handling
 

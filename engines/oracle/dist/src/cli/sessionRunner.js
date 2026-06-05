@@ -394,7 +394,7 @@ export async function performSessionRun({ sessionMeta, runOptions, mode, browser
             const recoverableRuntime = runtime ?? sessionMeta.browser?.runtime;
             if (!hasRecoverableChatGptConversation(recoverableRuntime) &&
                 recoverableRuntime?.promptSubmitted !== true) {
-                log(dim("Chrome disconnected before a ChatGPT conversation was created; marking session error."));
+                log(dim("PROMPT_NOT_SUBMITTED: Chrome disconnected before a ChatGPT conversation was created; marking session error."));
                 if (modelForStatus) {
                     await sessionStore.updateModelRun(sessionMeta.id, modelForStatus, {
                         status: "error",
@@ -425,7 +425,7 @@ export async function performSessionRun({ sessionMeta, runOptions, mode, browser
                 });
                 throw error;
             }
-            log(dim("Chrome disconnected before completion; keeping session running for reattach."));
+            log(dim("LONG_THINKING_IN_PROGRESS: Chrome disconnected before completion; keeping session running for reattach."));
             if (modelForStatus) {
                 await sessionStore.updateModelRun(sessionMeta.id, modelForStatus, {
                     status: "running",
@@ -447,7 +447,7 @@ export async function performSessionRun({ sessionMeta, runOptions, mode, browser
         if (assistantTimeout && mode === "browser") {
             const runtime = userError.details
                 ?.runtime;
-            log(dim("Assistant response timed out; marking capture incomplete for reattach."));
+            log(dim("CAPTURE_INCOMPLETE: Assistant response timed out; marking capture incomplete for reattach."));
             if (modelForStatus) {
                 await sessionStore.updateModelRun(sessionMeta.id, modelForStatus, {
                     status: "error",
@@ -814,7 +814,7 @@ async function autoReattachUntilComplete({ sessionMeta, runtime, browserConfig, 
         log(dim(`Auto-reattach starting in ${formatElapsed(delayMs)}...`));
         await wait(delayMs);
     }
-    log(dim(`Auto-reattach will stop after ${formatElapsed(maxTotalMs)} if no answer is captured.`));
+    log(dim(`LONG_THINKING_IN_PROGRESS: Auto-reattach will stop after ${formatElapsed(maxTotalMs)} if no answer is captured.`));
     const logger = ((message) => {
         if (message) {
             log(dim(message));

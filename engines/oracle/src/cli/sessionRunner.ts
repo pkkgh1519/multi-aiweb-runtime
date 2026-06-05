@@ -515,7 +515,7 @@ export async function performSessionRun({
       ) {
         log(
           dim(
-            "Chrome disconnected before a ChatGPT conversation was created; marking session error.",
+            "PROMPT_NOT_SUBMITTED: Chrome disconnected before a ChatGPT conversation was created; marking session error.",
           ),
         );
         if (modelForStatus) {
@@ -548,7 +548,7 @@ export async function performSessionRun({
         });
         throw error;
       }
-      log(dim("Chrome disconnected before completion; keeping session running for reattach."));
+      log(dim("LONG_THINKING_IN_PROGRESS: Chrome disconnected before completion; keeping session running for reattach."));
       if (modelForStatus) {
         await sessionStore.updateModelRun(sessionMeta.id, modelForStatus, {
           status: "running",
@@ -570,7 +570,7 @@ export async function performSessionRun({
     if (assistantTimeout && mode === "browser") {
       const runtime = (userError.details as { runtime?: BrowserRuntimeMetadata } | undefined)
         ?.runtime;
-      log(dim("Assistant response timed out; marking capture incomplete for reattach."));
+      log(dim("CAPTURE_INCOMPLETE: Assistant response timed out; marking capture incomplete for reattach."));
       if (modelForStatus) {
         await sessionStore.updateModelRun(sessionMeta.id, modelForStatus, {
           status: "error",
@@ -1070,7 +1070,7 @@ async function autoReattachUntilComplete({
     log(dim(`Auto-reattach starting in ${formatElapsed(delayMs)}...`));
     await wait(delayMs);
   }
-  log(dim(`Auto-reattach will stop after ${formatElapsed(maxTotalMs)} if no answer is captured.`));
+  log(dim(`LONG_THINKING_IN_PROGRESS: Auto-reattach will stop after ${formatElapsed(maxTotalMs)} if no answer is captured.`));
 
   const logger: BrowserLogger = ((message?: string) => {
     if (message) {

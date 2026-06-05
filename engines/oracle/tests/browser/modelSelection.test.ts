@@ -16,8 +16,9 @@ const evaluateImmediateModelSelectionExpression = (
   buttonLabel: string,
   composerLabel = "",
   proPillLabel = "",
+  strategy: "select" | "current" | "ignore" = "select",
 ): unknown => {
-  const expression = buildModelSelectionExpressionForTest(targetModel);
+  const expression = buildModelSelectionExpressionForTest(targetModel, strategy);
   const modelButton = { textContent: buttonLabel };
   const composerSignal = composerLabel ? { textContent: composerLabel } : null;
   const proPill = proPillLabel
@@ -334,7 +335,57 @@ const evaluateComposerPillFallbackExpression = (
   );
 };
 
+const evaluateMissingButtonExpression = (
+  targetModel: string,
+  strategy: "select" | "current" | "ignore" = "select",
+): unknown => {
+  const expression = buildModelSelectionExpressionForTest(targetModel, strategy);
+  const documentStub = {
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    title: "",
+    body: { innerText: "" },
+  };
+  const performanceStub = { now: () => 0 };
+  const windowStub = { location: { href: "https://chatgpt.com/" } };
+  const EventTargetStub = class {};
+  const MouseEventStub = class {};
+  const evaluate = new Function(
+    "document",
+    "performance",
+    "setTimeout",
+    "window",
+    "EventTarget",
+    "MouseEvent",
+    "HTMLElement",
+    `return ${expression};`,
+  ) as (
+    document: unknown,
+    performance: unknown,
+    setTimeout: unknown,
+    window: unknown,
+    EventTarget: unknown,
+    MouseEvent: unknown,
+    HTMLElement: unknown,
+  ) => unknown;
+
+  return evaluate(
+    documentStub,
+    performanceStub,
+    () => 0,
+    windowStub,
+    EventTargetStub,
+    MouseEventStub,
+    class {},
+  );
+};
+
 describe("browser model selection matchers", () => {
+  it("marks missing ChatGPT model selector as classifiable", () => {
+    const expression = buildModelSelectionExpressionForTest("gpt-5.5-pro");
+    expect(expression).toContain("MODEL_SELECTOR_UNAVAILABLE");
+  });
+
   it("includes pro + 5.5 tokens for gpt-5.5-pro", () => {
     const { labelTokens, testIdTokens } = buildModelMatchersLiteralForTest("gpt-5.5-pro");
     expect(labelTokens).toContain("pro extended");
@@ -706,8 +757,22 @@ describe("browser model selection matchers", () => {
   it("finds the rewritten ChatGPT composer pill model button", () => {
     const expression = buildModelSelectionExpressionForTest("gpt-5.5-pro");
     expect(expression).toContain('data-testid="model-switcher-dropdown-button"');
+    expect(expression).toContain('data-testid="model-switcher-button"');
     expect(expression).toContain("button.__composer-pill[aria-haspopup=");
+    expect(expression).toContain('button[aria-label*="model" i][aria-haspopup="menu"]');
+    expect(expression).toContain('button[aria-label*="모델"][aria-haspopup="menu"]');
     expect(expression).toContain("const findModelButton = () =>");
-    expect(expression).toContain("button.__composer-pill')).find(looksLikeModelPill)");
+    expect(expression).toContain('button.__composer-pill, button[aria-haspopup="menu"], [role="button"][aria-haspopup="menu"]');
+  });
+
+  it("keeps current model strategy recoverable when the picker button is absent", () => {
+    expect(evaluateMissingButtonExpression("gpt-5.5-pro", "current")).toEqual({
+      status: "already-selected",
+      label: "gpt-5.5-pro",
+    });
+    expect(evaluateMissingButtonExpression("gpt-5.5-pro")).toEqual({
+      status: "button-missing",
+      marker: "MODEL_SELECTOR_UNAVAILABLE",
+    });
   });
 });

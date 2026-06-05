@@ -31,3 +31,4 @@ profiles/
 Thumbs.db
 .vscode/
 .idea/
+.worktrees/

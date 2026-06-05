@@ -6,6 +6,11 @@ import {
 } from "../../src/browser/actions/thinkingTime.js";
 
 describe("browser thinking-time selection expression", () => {
+  it("marks unconfirmed Pro Extended effort as classifiable", () => {
+    const expression = buildThinkingTimeExpressionForTest("extended");
+    expect(expression).toContain("PRO_EFFORT_UNCONFIRMED");
+  });
+
   it("uses centralized menu selectors and normalized matching", () => {
     const expression = buildThinkingTimeExpressionForTest();
     expect(expression).toContain("const MENU_CONTAINER_SELECTOR");

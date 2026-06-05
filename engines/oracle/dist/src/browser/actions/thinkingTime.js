@@ -35,7 +35,7 @@ export async function ensureThinkingTime(Runtime, level, logger, desiredModel) {
                     : "";
             const message = `Thinking time: ${result.status.replaceAll("-", " ")}${kindHint} (requested ${capitalizedLevel})`;
             if (strictProEffort) {
-                throw new Error(`${message}; refusing to submit without confirmed Pro Extended.`);
+                throw new Error(`${message}; PRO_EFFORT_UNCONFIRMED: refusing to submit without confirmed Pro Extended.`);
             }
             logger(`${message}; continuing with ChatGPT default.`);
             return;
@@ -43,7 +43,7 @@ export async function ensureThinkingTime(Runtime, level, logger, desiredModel) {
         default: {
             await logDomFailure(Runtime, logger, "thinking-time-unknown");
             if (strictProEffort) {
-                throw new Error(`Thinking time: unknown outcome selecting ${capitalizedLevel}; refusing to submit without confirmed Pro Extended.`);
+                throw new Error(`PRO_EFFORT_UNCONFIRMED: Thinking time: unknown outcome selecting ${capitalizedLevel}; refusing to submit without confirmed Pro Extended.`);
             }
             logger(`Thinking time: unknown outcome selecting ${capitalizedLevel}; continuing with ChatGPT default.`);
             return;
@@ -107,6 +107,7 @@ function buildThinkingTimeExpression(level, desiredModel) {
     return `(async () => {
     ${buildClickDispatcher()}
 
+    const PRO_EFFORT_UNCONFIRMED_MARKER = 'PRO_EFFORT_UNCONFIRMED';
     const MENU_CONTAINER_SELECTOR = ${menuContainerLiteral};
     const MENU_ITEM_SELECTOR = ${menuItemLiteral};
     const MODEL_BUTTON_SELECTOR = ${modelButtonLiteral};

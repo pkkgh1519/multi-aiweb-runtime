@@ -33,13 +33,9 @@
       "Write"
     ],
     "defaultPrompt": [
-      "GPT한테 물어봐: use Web GPT as an agent-style search brain, brainstorming partner, reviewer, or cross-checker. Compose the prompt for the situation and use Extension Heavy by default.",
-      "GPT 프로모드로 호출해서 의견 물어봐: use Pro Extended only when explicitly requested, and allow 10 minutes or longer for the answer.",
-      "GPT provider 장애니까 Oracle 경유로 Web GPT에 리뷰 맡겨: use browser_backend='oracle', preview repo-scoped files with dry_run_policy=true, then run after the scope is acceptable.",
-      "제미나이 브라우저 모드로 크로스검토해: use browser_backend='oracle', oracle_target='gemini_browser', an allowed Gemini browser model, and dry_run_policy=true before sending repo files.",
-      "Use Multi-AI Web Runtime to run a dry-run prompt and show the artifacts.",
-      "Prepare an AI web browser session and tell me whether login or CAPTCHA action is required.",
-      "Run this prompt through an AI web target and wait for the structured response artifact."
+      "GPT Pro web review via Oracle. Use Pro Extended only when explicitly requested.",
+      "Prepare the ChatGPT web profile and report login, Pro, or CAPTCHA blockers.",
+      "Run an AI web dry run and show artifact paths before sending files."
     ],
     "brandColor": "#10A37F",
     "screenshots": [],

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,7 @@ from .oracle_client import (
     resolve_oracle_model,
     resolve_oracle_thinking_time,
 )
-from .redaction import redact
+from .redaction import redact, redact_nested
 from .safe_paths import validate_name
 from .state import read_json, status_is_terminal
 
@@ -91,15 +92,39 @@ class ChatGptWebRuntime:
 
     @staticmethod
     def _redact_nested(value: Any) -> Any:
-        if isinstance(value, str):
-            return redact(value)
-        if isinstance(value, dict):
-            return {redact(str(key)): ChatGptWebRuntime._redact_nested(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [ChatGptWebRuntime._redact_nested(item) for item in value]
-        if isinstance(value, tuple):
-            return [ChatGptWebRuntime._redact_nested(item) for item in value]
-        return value
+        return redact_nested(value)
+
+    @staticmethod
+    def _prompt_hash(question: str) -> str:
+        return hashlib.sha256(question.encode("utf-8")).hexdigest()
+
+    def _assert_run_not_terminal(self, artifacts: RunArtifacts) -> None:
+        if not artifacts.status_json.exists():
+            return
+        status_payload = read_json(artifacts.status_json)
+        status = str(status_payload.get("status") or "")
+        if status_is_terminal(status) and not self._status_payload_recoverable(status_payload):
+            raise ValueError(f"Cannot update terminal run status: {status}")
+
+    @staticmethod
+    def _status_payload_recoverable(status_payload: dict[str, Any]) -> bool:
+        status = str(status_payload.get("status") or "")
+        phase = str(status_payload.get("phase") or "")
+        if status == "running":
+            return True
+        return phase in {
+            "PROFILE_BUSY",
+            "LOGIN_REQUIRED",
+            "MODEL_SELECTOR_UNAVAILABLE",
+            "PRO_NOT_AVAILABLE",
+            "PRO_EFFORT_UNCONFIRMED",
+            "PROMPT_NOT_SUBMITTED",
+            "CHROME_NOT_FOUND",
+            "LONG_THINKING_IN_PROGRESS",
+            "REATTACH_REQUIRED",
+            "CAPTURE_INCOMPLETE",
+            "USER_ACTION_REQUIRED",
+        }
 
     def _external_playwright_action_plan(
         self,
@@ -186,15 +211,117 @@ class ChatGptWebRuntime:
     def _write_status_and_update_run(self, artifacts: RunArtifacts, status_payload: dict[str, Any]) -> None:
         run_payload = read_json(artifacts.run_json)
         if run_payload:
-            run_payload.update(
+            history = list(run_payload.get("state_history") or [])
+            history.append(
                 {
                     "status": status_payload.get("status"),
                     "phase": status_payload.get("phase"),
                     "updated_at": status_payload.get("updated_at"),
                 }
             )
+            run_payload.update(
+                {
+                    "status": status_payload.get("status"),
+                    "phase": status_payload.get("phase"),
+                    "updated_at": status_payload.get("updated_at"),
+                    "state_history": history[-20:],
+                    "recoverable": self._status_payload_recoverable(status_payload),
+                }
+            )
             atomic_write_json(artifacts.run_json, run_payload)
         atomic_write_json(artifacts.status_json, status_payload)
+
+    def _validate_external_completion_evidence(
+        self,
+        *,
+        run_id: str,
+        artifacts: RunArtifacts,
+        response_text: str,
+        evidence: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        run_payload = self._load_run_payload(artifacts, run_id)
+        if run_payload.get("browser_backend") != PLAYWRIGHT_MCP_BACKEND:
+            return self._redact_nested(evidence or {})
+        payload = evidence or {}
+        if not response_text.strip():
+            raise ValueError("External completion response_text must be non-empty")
+        required = ("run_id", "oracle_provider", "oracle_target", "url", "prompt_hash", "final_status")
+        missing = [key for key in required if not payload.get(key)]
+        if missing:
+            raise ValueError(f"Missing completion evidence: {', '.join(missing)}")
+        if str(payload.get("run_id")) != run_id:
+            raise ValueError("External completion evidence run_id mismatch")
+        expected_target = str(run_payload.get("oracle_target") or DEFAULT_ORACLE_TARGET)
+        expected_provider = oracle_target_provider(expected_target)
+        if str(payload.get("oracle_provider")) != expected_provider:
+            raise ValueError(f"External completion evidence must identify {expected_provider} provider")
+        if str(payload.get("oracle_target")) != expected_target:
+            raise ValueError(f"External completion evidence must identify {expected_target} target")
+        if str(payload.get("prompt_hash")) != str(run_payload.get("prompt_hash")):
+            raise ValueError("External completion evidence prompt_hash mismatch")
+        url = str(payload.get("url") or "")
+        if expected_provider == "chatgpt":
+            if "chatgpt.com" not in url:
+                raise ValueError("External completion evidence must include a ChatGPT URL")
+            if "/c/" not in url and not payload.get("conversation_id"):
+                raise ValueError("External completion evidence must include a conversation URL or conversation_id")
+        elif expected_provider == "gemini":
+            if "gemini.google.com" not in url:
+                raise ValueError("External completion evidence must include a Gemini URL")
+        if str(payload.get("final_status")).lower() not in {"done", "completed"}:
+            raise ValueError("External completion evidence final_status must be done or completed")
+        return self._redact_nested(payload)
+
+    def _resume_guidance_for_phase(self, status_payload: dict[str, Any]) -> tuple[str, str]:
+        phase = str(status_payload.get("phase") or "")
+        provider = str(status_payload.get("oracle_provider") or "").lower()
+        target = str(status_payload.get("oracle_target") or DEFAULT_ORACLE_TARGET)
+        provider_label = "Gemini" if provider == "gemini" or target == "gemini_browser" else "ChatGPT"
+        target_arg = "gemini_browser" if provider_label == "Gemini" else "chatgpt_browser"
+        if phase == "MODEL_SELECTOR_UNAVAILABLE":
+            return (
+                "use_playwright_mcp",
+                "ChatGPT model selector was not available to Oracle. Use Playwright MCP to inspect the visible ChatGPT tab and record user_action_required if the UI changed or a gate is visible.",
+            )
+        if phase == "PRO_NOT_AVAILABLE":
+            return (
+                "use_playwright_mcp",
+                "ChatGPT Pro was not available in the model picker. Inspect the account in the browser profile before retrying.",
+            )
+        if phase == "PRO_EFFORT_UNCONFIRMED":
+            return (
+                "use_playwright_mcp",
+                "Oracle refused to submit because Pro Extended effort was not confirmed. Inspect the model picker and thinking effort controls.",
+            )
+        if phase == "PROFILE_BUSY":
+            return (
+                "close_conflicting_browser",
+                f"The Oracle {provider_label} profile is busy or has an unreachable DevTools port. Close Chrome windows using the Oracle profile, then retry prepare_session or run_start.",
+            )
+        if phase == "LOGIN_REQUIRED":
+            return (
+                "run_oracle_manual_login_setup",
+                f"The {provider_label} browser profile is not logged in. Run aiweb_prepare_session with browser_backend='oracle', oracle_target='{target_arg}', open_browser=true.",
+            )
+        if phase == "CHROME_NOT_FOUND":
+            return (
+                "configure_chrome_path",
+                "Oracle could not locate a Chrome or Chromium browser. Install Chrome, or ensure the standard Windows Chrome path is available before retrying prepare_session or run_start.",
+            )
+        if phase == "REATTACH_REQUIRED":
+            return (
+                "inspect_artifacts",
+                "The Pro run appears to need reattach because it may still be thinking or capture was incomplete. Inspect Oracle artifacts and retry resume after the answer appears.",
+            )
+        if phase == "CAPTURE_INCOMPLETE":
+            return (
+                "inspect_artifacts",
+                "The Pro answer capture was incomplete. Inspect Oracle artifacts, then retry resume or use Playwright MCP to harvest the completed response.",
+            )
+        return (
+            "inspect_artifacts" if status_payload.get("status") != "user_action_required" else "use_playwright_mcp",
+            str(status_payload.get("message") or "Inspect artifacts for the current run state."),
+        )
 
     def prepare_session(
         self,
@@ -209,6 +336,33 @@ class ChatGptWebRuntime:
         profile_dir = self.config.profile_dir(profile_name)
         profile_dir.mkdir(parents=True, exist_ok=True)
         if dry_run:
+            if backend in {ORACLE_BACKEND, PLAYWRIGHT_MCP_BACKEND}:
+                target = normalize_oracle_target(oracle_target)
+                provider = oracle_target_provider(target)
+                payload = {
+                    "ok": True,
+                    "auth_state": "ready",
+                    "next_action": "continue",
+                    "profile_dir": str(profile_dir),
+                    "chat_url": oracle_target_chat_url(target),
+                    "browser_backend": backend,
+                    "oracle_target": target,
+                    "oracle_provider": provider,
+                    "message": "Dry-run session is ready.",
+                }
+                if backend == ORACLE_BACKEND:
+                    oracle_home_base = self.config.oracle_home_dir or (self.config.state_root / "oracle")
+                    oracle_home = oracle_target_home_dir(oracle_home_base, target)
+                    oracle_profile = oracle_target_profile_dir(oracle_home_base, target)
+                    payload.update(
+                        {
+                            "profile_dir": str(oracle_profile.resolve()),
+                            "codex_profile_dir": str(profile_dir),
+                            "oracle_home_dir": str(oracle_home.resolve()),
+                            "oracle_profile_dir": str(oracle_profile.resolve()),
+                        }
+                    )
+                return payload
             return {
                 "ok": True,
                 "auth_state": "ready",
@@ -233,7 +387,8 @@ class ChatGptWebRuntime:
                 "ok": False,
                 "auth_state": "user_action_required",
                 "next_action": "run_oracle_manual_login_setup",
-                "profile_dir": str(profile_dir),
+                "profile_dir": str(oracle_profile.resolve()),
+                "codex_profile_dir": str(profile_dir),
                 "oracle_home_dir": str(oracle_home.resolve()),
                 "oracle_profile_dir": str(oracle_profile.resolve()),
                 "oracle_target": target,
@@ -337,6 +492,11 @@ class ChatGptWebRuntime:
             "created_at_ns": created_at_ns,
             "updated_at": created_at,
             "question_chars": len(question),
+            "prompt_hash": self._prompt_hash(question),
+            "prompt_hash_algorithm": "sha256",
+            "hash_algorithm": "sha256",
+            "state_history": [],
+            "recoverable": False,
             "files": files or [],
             "mode_label": mode_label,
             "mode_variant": mode_variant,
@@ -416,7 +576,14 @@ class ChatGptWebRuntime:
                 "updated_at": now_iso(),
                 "message": "Live ChatGPT Web execution requires prepare_session and browser backend enablement.",
             }
-        run_payload.update({"status": status_payload["status"], "phase": status_payload["phase"], "updated_at": status_payload["updated_at"]})
+        run_payload.update(
+            {
+                "status": status_payload["status"],
+                "phase": status_payload["phase"],
+                "updated_at": status_payload["updated_at"],
+                "recoverable": self._status_payload_recoverable(status_payload),
+            }
+        )
         for key in ("oracle_scope", "oracle_target", "oracle_provider", "oracle_model", "oracle_thinking_time", "oracle_engine"):
             if key in status_payload:
                 run_payload[key] = status_payload[key]
@@ -658,7 +825,13 @@ class ChatGptWebRuntime:
     ) -> dict[str, Any]:
         artifacts = self._artifacts(run_id)
         self._load_run_payload(artifacts, run_id)
-        safe_evidence = self._redact_nested(evidence or {})
+        self._assert_run_not_terminal(artifacts)
+        safe_evidence = self._validate_external_completion_evidence(
+            run_id=run_id,
+            artifacts=artifacts,
+            response_text=response_text,
+            evidence=evidence,
+        )
         atomic_write_text(artifacts.response_md, response_text)
         prompt_text = artifacts.prompt_txt.read_text(encoding="utf-8") if artifacts.prompt_txt.exists() else ""
         event = RuntimeEvent(
@@ -695,6 +868,7 @@ class ChatGptWebRuntime:
     ) -> dict[str, Any]:
         artifacts = self._artifacts(run_id)
         self._load_run_payload(artifacts, run_id)
+        self._assert_run_not_terminal(artifacts)
         normalized_status = str(status or "error").lower()
         safe_evidence = self._redact_nested(evidence or {})
         runtime_status = "user_action_required" if normalized_status in USER_ACTION_FAILURE_STATUSES else "failed"
@@ -739,9 +913,13 @@ class ChatGptWebRuntime:
 
     def run_resume(self, run_id: str) -> dict[str, Any]:
         status = self.run_status(run_id)
-        if status.get("status") == "user_action_required":
-            return {**status, "resumable": True, "next_action": "prepare_session_then_start_live_run"}
-        return {**status, "resumable": False}
+        next_action, message = self._resume_guidance_for_phase(status)
+        return {
+            **status,
+            "resumable": bool(self._status_payload_recoverable(status)),
+            "next_action": next_action,
+            "message": message,
+        }
 
     def run_artifacts(self, run_id: str) -> dict[str, str]:
         artifacts = self._artifacts(run_id)

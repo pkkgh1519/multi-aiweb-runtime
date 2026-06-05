@@ -100,6 +100,18 @@ To install the plugin without Oracle dependencies, use:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -SkipOracleDeps
 ```
 
+### Oracle reports `No Chrome installations found`
+
+On Windows, the runtime passes the standard local Chrome or Chromium-family executable path to Oracle when it can detect one. If a run still reports `CHROME_NOT_FOUND`, install Chrome or verify that one of these paths exists before retrying:
+
+```text
+C:\Program Files\Google\Chrome\Application\chrome.exe
+C:\Program Files (x86)\Google\Chrome\Application\chrome.exe
+%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe
+```
+
+The run remains a user-action-required state and `aiweb_run_resume` reports the next action instead of treating the error as an opaque Oracle failure.
+
 ## Verify the install
 
 ```powershell
@@ -142,6 +154,8 @@ Ask Codex to use Multi-AI Web Runtime for a dry-run prompt, or call the MCP flow
 ## Security notes
 
 Authentication remains user-mediated in visible or dedicated browser profiles. The runtime does not extract browser credentials, copy cookies, move tokens between profiles, or enable provider API keys by default.
+
+ChatGPT/Gemini prompts and final web responses are stored locally as run artifacts under the Codex state directory. Do not send secrets, credentials, cookies, private keys, or browser profile files through AI web runs. Runtime logs and events are redacted, but the browser provider still receives the prompt and any approved files.
 
 For Oracle-backed runs, requested files are validated before launch. Prompt-only Oracle runs use a managed empty runtime directory. File-attached runs reject repo escapes, absolute Windows drive paths, home-directory paths, `.env`-style files, private keys, cookie stores, and browser profile storage.
 

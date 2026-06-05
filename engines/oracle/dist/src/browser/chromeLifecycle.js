@@ -46,7 +46,7 @@ export function registerTerminationHooks(chrome, userDataDir, keepBrowser, logge
         const inFlight = opts?.isInFlight?.() ?? false;
         const leaveRunning = keepBrowser || inFlight;
         if (leaveRunning) {
-            logger(`Received ${signal}; leaving Chrome running${inFlight ? " (assistant response pending)" : ""}`);
+            logger(`PROFILE_BUSY: Received ${signal}; leaving Chrome running${inFlight ? " (assistant response pending)" : ""}`);
         }
         else {
             logger(`Received ${signal}; terminating Chrome process`);
@@ -69,6 +69,7 @@ export function registerTerminationHooks(chrome, userDataDir, keepBrowser, logge
                 if (opts?.preserveUserDataDir) {
                     // Preserve the profile directory (manual login), but clear reattach hints so we don't
                     // try to reuse a dead DevTools port on the next run.
+                    logger("STALE_DEVTOOLS_PORT: clearing stale profile state for preserved manual-login profile after Chrome termination.");
                     await cleanupStaleProfileState(userDataDir, logger, { lockRemovalMode: "never" }).catch(() => undefined);
                 }
                 else {
