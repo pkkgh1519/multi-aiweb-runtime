@@ -186,7 +186,7 @@ class OracleClient:
         if chrome_path:
             command.extend(["--browser-chrome-path", chrome_path])
         if target == CHATGPT_BROWSER_TARGET:
-            command.extend(["--browser-model-strategy", "current"])
+            command.extend(["--browser-model-strategy", "ignore"])
         elif target == GEMINI_BROWSER_TARGET:
             command.extend(["--browser-thinking-time", "standard"])
         if resolved_model:
@@ -405,7 +405,7 @@ class OracleClient:
             command.extend(
                 [
                     "--browser-model-strategy",
-                    "select" if pro_extended else "current",
+                    "select" if pro_extended else "ignore",
                     "--browser-thinking-time",
                     thinking_time,
                 ]

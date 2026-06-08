@@ -173,7 +173,8 @@ const evaluateMenuModelSelectionExpression = async (
     body: { innerText: "" },
     dispatchEvent: () => true,
   };
-  const performanceStub = { now: () => 0 };
+  let now = 0;
+  const performanceStub = { now: () => (now += 1000) };
   const windowStub = { location: { href: "https://chatgpt.com/" } };
   const immediateSetTimeout = (handler: TimerHandler): number => {
     if (typeof handler === "function") {
@@ -346,7 +347,8 @@ const evaluateMissingButtonExpression = (
     title: "",
     body: { innerText: "" },
   };
-  const performanceStub = { now: () => 0 };
+  let now = 0;
+  const performanceStub = { now: () => (now += 1000) };
   const windowStub = { location: { href: "https://chatgpt.com/" } };
   const EventTargetStub = class {};
   const MouseEventStub = class {};
@@ -372,7 +374,12 @@ const evaluateMissingButtonExpression = (
   return evaluate(
     documentStub,
     performanceStub,
-    () => 0,
+    (handler: TimerHandler) => {
+      if (typeof handler === "function") {
+        handler();
+      }
+      return 0;
+    },
     windowStub,
     EventTargetStub,
     MouseEventStub,
@@ -496,8 +503,8 @@ describe("browser model selection matchers", () => {
     expect(expression).toContain("desiredVersion === '5-5'");
   });
 
-  it("recognizes bare Pro as already selected when Pro is the browser target", () => {
-    const result = evaluateImmediateModelSelectionExpression("Pro", "Pro");
+  it("recognizes bare Pro as already selected when Pro is the browser target", async () => {
+    const result = await evaluateImmediateModelSelectionExpression("Pro", "Pro");
     expect(result).toEqual({ status: "already-selected", label: "Pro" });
   });
 
@@ -532,8 +539,8 @@ describe("browser model selection matchers", () => {
     expect(expression).toContain("hasProComposerPill()");
   });
 
-  it("does not let a standalone thinking chip pollute Pro model verification", () => {
-    const result = evaluateImmediateModelSelectionExpression(
+  it("does not let a standalone thinking chip pollute Pro model verification", async () => {
+    const result = await evaluateImmediateModelSelectionExpression(
       "gpt-5.5-pro",
       "ChatGPT",
       "Thinking Extended",
@@ -542,8 +549,8 @@ describe("browser model selection matchers", () => {
     expect(result).toEqual({ status: "already-selected", label: "Pro" });
   });
 
-  it("accepts a Pro pill plus effort label as the current Pro model", () => {
-    const result = evaluateImmediateModelSelectionExpression(
+  it("accepts a Pro pill plus effort label as the current Pro model", async () => {
+    const result = await evaluateImmediateModelSelectionExpression(
       "gpt-5.5-pro",
       "Extended",
       "",
@@ -574,8 +581,8 @@ describe("browser model selection matchers", () => {
     ).resolves.toEqual({ status: "switched", label: "Thinking Heavy" });
   });
 
-  it("recognizes effort-only labels as selected Thinking when no Pro pill is present", () => {
-    const result = evaluateImmediateModelSelectionExpression("Thinking 5.5", "Heavy", "Thinking");
+  it("recognizes effort-only labels as selected Thinking when no Pro pill is present", async () => {
+    const result = await evaluateImmediateModelSelectionExpression("Thinking 5.5", "Heavy", "Thinking");
     expect(result).toEqual({ status: "already-selected", label: "Thinking" });
   });
 
@@ -594,8 +601,8 @@ describe("browser model selection matchers", () => {
     ).resolves.toEqual({ status: "switched", label: "GPT-5.4" });
   });
 
-  it("finds the current model pill when ChatGPT omits aria-haspopup", () => {
-    const result = evaluateComposerPillFallbackExpression("Thinking 5.5", "Thinking Heavy");
+  it("finds the current model pill when ChatGPT omits aria-haspopup", async () => {
+    const result = await evaluateComposerPillFallbackExpression("Thinking 5.5", "Thinking Heavy");
     expect(result).toEqual({ status: "already-selected", label: "Thinking Heavy" });
   });
 
@@ -759,20 +766,69 @@ describe("browser model selection matchers", () => {
     expect(expression).toContain('data-testid="model-switcher-dropdown-button"');
     expect(expression).toContain('data-testid="model-switcher-button"');
     expect(expression).toContain("button.__composer-pill[aria-haspopup=");
+    expect(expression).toContain('button[aria-label="모델 선택기"]');
+    expect(expression).toContain('button[aria-label*="model selector" i]');
     expect(expression).toContain('button[aria-label*="model" i][aria-haspopup="menu"]');
     expect(expression).toContain('button[aria-label*="모델"][aria-haspopup="menu"]');
     expect(expression).toContain("const findModelButton = () =>");
     expect(expression).toContain('button.__composer-pill, button[aria-haspopup="menu"], [role="button"][aria-haspopup="menu"]');
+    expect(expression).toContain('button[aria-haspopup="menu"]');
+    expect(expression).toContain("const waitForModelButton = async () =>");
   });
 
-  it("keeps current model strategy recoverable when the picker button is absent", () => {
-    expect(evaluateMissingButtonExpression("gpt-5.5-pro", "current")).toEqual({
+  it("keeps current model strategy recoverable when the picker button is absent", async () => {
+    await expect(evaluateMissingButtonExpression("gpt-5.5-pro", "current")).resolves.toEqual({
       status: "already-selected",
       label: "gpt-5.5-pro",
     });
-    expect(evaluateMissingButtonExpression("gpt-5.5-pro")).toEqual({
+    await expect(evaluateMissingButtonExpression("gpt-5.5-pro")).resolves.toEqual({
       status: "button-missing",
       marker: "MODEL_SELECTOR_UNAVAILABLE",
     });
+  });
+
+  it("finds the localized ChatGPT model selector button", async () => {
+    const expression = buildModelSelectionExpressionForTest("ChatGPT");
+    const localizedButton = { textContent: "ChatGPT" };
+    const documentStub = {
+      querySelector: (selector: string) => {
+        if (selector.includes('button[aria-label="모델 선택기"]')) {
+          return localizedButton;
+        }
+        return null;
+      },
+      querySelectorAll: () => [],
+      title: "",
+      body: { innerText: "" },
+    };
+    const evaluate = new Function(
+      "document",
+      "performance",
+      "setTimeout",
+      "window",
+      "EventTarget",
+      "MouseEvent",
+      `return ${expression};`,
+    ) as (
+      document: unknown,
+      performance: unknown,
+      setTimeout: unknown,
+      window: unknown,
+      EventTarget: unknown,
+      MouseEvent: unknown,
+    ) => unknown;
+
+    const result = await Promise.resolve(
+      evaluate(
+        documentStub,
+        { now: () => 0 },
+        () => 0,
+        { location: { href: "https://chatgpt.com/" } },
+        class {},
+        class {},
+      ),
+    );
+
+    expect(result).toEqual({ status: "already-selected", label: "ChatGPT" });
   });
 });

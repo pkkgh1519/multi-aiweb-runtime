@@ -191,6 +191,8 @@ class OracleManualLoginSetupTests(unittest.TestCase):
             self.assertIn("--browser-manual-login-profile-dir", command)
             self.assertNotIn("--browser-headless", command)
             self.assertNotIn("--browser-hide-window", command)
+            strategy_index = command.index("--browser-model-strategy")
+            self.assertEqual(command[strategy_index + 1], "ignore")
             self.assertEqual(command[-2:], ["-p", "HI"])
 
     def test_gemini_manual_login_setup_passes_detected_chrome_path(self) -> None:
@@ -364,6 +366,40 @@ class OracleManualLoginSetupTests(unittest.TestCase):
             thinking_index = captured_command.index("--browser-thinking-time")
             self.assertEqual(captured_command[thinking_index + 1], "standard")
 
+    def test_extension_heavy_ignores_model_selector_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_path = root / "response.md"
+            captured_command: list[str] = []
+
+            def runner(command: Sequence[str], **kwargs: Any) -> CompletedProcess[str]:
+                captured_command.extend(command)
+                output_path.write_text("ok", encoding="utf-8")
+                return CompletedProcess(command, 0, stdout="", stderr="")
+
+            client = OracleClient(
+                command=("python", "-P", "-m", "multi_aiweb_runtime.oracle_engine_cli"),
+                oracle_home_dir=root / "oracle",
+                runner=runner,
+            )
+
+            result = client.run_browser_consult(
+                prompt="review this prompt",
+                files=[],
+                output_path=output_path,
+                cwd=root,
+                mode_label="Extension Heavy",
+                mode_variant="heavy",
+                timeout_seconds=30,
+                oracle_target=CHATGPT_BROWSER_TARGET,
+            )
+
+            self.assertEqual(result.exit_code, 0)
+            strategy_index = captured_command.index("--browser-model-strategy")
+            self.assertEqual(captured_command[strategy_index + 1], "ignore")
+            thinking_index = captured_command.index("--browser-thinking-time")
+            self.assertEqual(captured_command[thinking_index + 1], "heavy")
+
     def test_gemini_flash_rejects_extended_thinking_time(self) -> None:
         with self.assertRaises(ValueError):
             resolve_oracle_thinking_time(
@@ -406,6 +442,8 @@ class OracleManualLoginSetupTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 0)
             browser_timeout_index = captured_command.index("--browser-timeout")
             self.assertEqual(captured_command[browser_timeout_index + 1], "3600s")
+            strategy_index = captured_command.index("--browser-model-strategy")
+            self.assertEqual(captured_command[strategy_index + 1], "select")
             thinking_index = captured_command.index("--browser-thinking-time")
             self.assertEqual(captured_command[thinking_index + 1], "heavy")
             self.assertEqual(captured_kwargs["timeout"], 4200)

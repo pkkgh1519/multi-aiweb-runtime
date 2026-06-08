@@ -97,7 +97,7 @@ function buildModelSelectionExpression(targetModel, strategy) {
     const composerAllowBlankLiteral = JSON.stringify(composerSignalMatchers.allowBlank);
     const menuContainerLiteral = JSON.stringify(MENU_CONTAINER_SELECTOR);
     const menuItemLiteral = JSON.stringify(MENU_ITEM_SELECTOR);
-    return `(() => {
+    return `(async () => {
     ${buildClickDispatcher()}
     // Capture the selectors and matcher literals up front so the browser expression stays pure.
     const MODEL_SELECTOR_UNAVAILABLE_MARKER = 'MODEL_SELECTOR_UNAVAILABLE';
@@ -114,6 +114,7 @@ function buildModelSelectionExpression(targetModel, strategy) {
     const REOPEN_INTERVAL_MS = 400;
     const MAX_WAIT_MS = 20000;
     const SETTLE_WAIT_MS = 1500;
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const normalizeText = (value) => {
       if (!value) {
         return '';
@@ -183,36 +184,64 @@ function buildModelSelectionExpression(targetModel, strategy) {
         })
     );
 
+    const isElementLike = (node) => Boolean(node && typeof node === 'object');
     const isVisibleElement = (node) => {
-      if (!(node instanceof HTMLElement)) return false;
-      const rect = node.getBoundingClientRect();
-      const style = window.getComputedStyle(node);
+      if (!isElementLike(node)) return false;
+      const rect = typeof node.getBoundingClientRect === 'function'
+        ? node.getBoundingClientRect()
+        : { width: 1, height: 1 };
+      const style = typeof window.getComputedStyle === 'function'
+        ? window.getComputedStyle(node)
+        : { display: 'block', visibility: 'visible' };
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     };
+    const matchesModelButtonCandidate = (node) =>
+      typeof node.matches !== 'function' ||
+      node.matches('button.__composer-pill, button[aria-haspopup="menu"], [role="button"][aria-haspopup="menu"], button[aria-label], [data-testid*="model-switcher"]');
     const looksLikeModelPill = (node) => {
-      if (!(node instanceof HTMLElement)) return false;
+      if (!isElementLike(node)) return false;
+      if (!matchesModelButtonCandidate(node)) return false;
       if (!isVisibleElement(node)) return false;
-      if (node.matches('button[data-testid="composer-plus-btn"], button.composer-btn')) return false;
-      const label = normalizeText(
-        (node.textContent ?? '') + ' ' + (node.getAttribute('aria-label') ?? '') + ' ' + (node.getAttribute('title') ?? '')
-      );
-      if (!label) return false;
-      if (label.includes('click to remove')) return false;
+      if (node.matches?.('button[data-testid="composer-plus-btn"], button.composer-btn')) return false;
       const rawLabel = (
-        (node.textContent ?? '') + ' ' + (node.getAttribute('aria-label') ?? '') + ' ' + (node.getAttribute('title') ?? '')
+        (node.textContent ?? '') + ' ' + (node.getAttribute?.('aria-label') ?? '') + ' ' + (node.getAttribute?.('title') ?? '')
       ).toLowerCase();
-      const localizedModelTokens = ['모델', '프로', '확장'];
+      const label = normalizeText(rawLabel);
+      if (!label && !/[모델프로확장생각표준]/.test(rawLabel)) return false;
+      if (label.includes('click to remove') || rawLabel.includes('클릭하여 제거')) return false;
       const modelTokens = ['chatgpt', 'gpt', 'instant', 'thinking', 'pro', 'extended', 'standard', 'heavy', 'light'];
-      if (localizedModelTokens.some((token) => rawLabel.includes(token))) return true;
-      return modelTokens.some((token) => hasToken(label, token));
+      const localizedModelSignals = ['모델', '프로', '확장', '생각', '표준'];
+      return modelTokens.some((token) => hasToken(label, token)) || localizedModelSignals.some((token) => rawLabel.includes(token));
     };
     const findModelButton = () => {
       const explicit = document.querySelector(BUTTON_SELECTOR);
-      if (explicit) return explicit;
-      return Array.from(document.querySelectorAll('button.__composer-pill, button[aria-haspopup="menu"], [role="button"][aria-haspopup="menu"]')).find(looksLikeModelPill) ?? null;
+      if (explicit && isVisibleElement(explicit)) return explicit;
+      const candidates = [
+        ...document.querySelectorAll('button.__composer-pill'),
+        ...document.querySelectorAll('button[aria-haspopup="menu"]'),
+        ...document.querySelectorAll('[role="button"][aria-haspopup="menu"]'),
+        ...document.querySelectorAll('button[aria-label]'),
+        ...document.querySelectorAll('[data-testid*="model-switcher"]'),
+      ];
+      return candidates.find(looksLikeModelPill) ?? null;
     };
 
-    const button = findModelButton();
+    const waitForModelButton = async () => {
+      let candidate = findModelButton();
+      if (candidate) return candidate;
+      await sleep(INITIAL_WAIT_MS);
+      const start = performance.now();
+      while (performance.now() - start < MAX_WAIT_MS) {
+        candidate = findModelButton();
+        if (candidate) return candidate;
+        await sleep(REOPEN_INTERVAL_MS);
+      }
+      return null;
+    };
+    let button = findModelButton();
+    if (!button && MODEL_STRATEGY !== 'current') {
+      button = await waitForModelButton();
+    }
     if (!button) {
       if (MODEL_STRATEGY === 'current') {
         return { status: 'already-selected', label: PRIMARY_LABEL };
